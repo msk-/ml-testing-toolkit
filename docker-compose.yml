@@ -17,7 +17,7 @@ services:
       - -c
       - "npm start |bunyan"
   mojaloop-testing-toolkit-ui:
-    image: mojaloop/ml-testing-toolkit-ui:v11.0.9
+    image: mojaloop/ml-testing-toolkit-ui:v11.1.0
     ports:
       - "6060:6060"
     environment:
@@ -26,14 +26,6 @@ services:
     command:
       - sh
       - /usr/share/nginx/start.sh
-
-  mongo:
-    image: mongo
-    # Disable logging as it is far too verbose for debugging locally
-    logging:
-      driver: none
-    ports:
-      - "27017:27017"
 
 networks:
   default:
