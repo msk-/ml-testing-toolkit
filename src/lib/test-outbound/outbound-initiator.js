@@ -65,7 +65,7 @@ const OutboundSend = async (inputTemplate, traceID, dfspId) => {
   const tracing = getTracing(traceID)
 
   const environmentVariables = {
-    items: Object.entries(inputTemplate.inputValues || {}).map((item) => { return { type: 'any', key: item[0], value: item[1] } })
+    items: Object.entries(inputTemplate.inputValues || {}).map(([key, value]) => ({ type: 'any', key, value }))
   }
   try {
     for (const i in inputTemplate.test_cases) {
