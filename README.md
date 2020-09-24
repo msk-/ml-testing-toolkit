@@ -1,7 +1,7 @@
 Mojaloop Testing Toolkit
 =============================
 
-The goal of the Self-testing Tool Kit is for the participants in a Mojaloop Hub, in particular DFSPs, but in future System Integrators and other entities, to have a standard way to test integration to a Mojaloop Hub. 
+The goal of the Self-testing Tool Kit is for the participants in a Mojaloop Hub, in particular DFSPs, but in future System Integrators and other entities, to have a standard way to test integration to a Mojaloop Hub.
 
 It should be simple to use for both technical and non-technical users; although it is primarily directed at QA personnel. The goal is to ensure that the tool is easy to use for almost anyone involved with a Mojaloop related system be able to quickly configure the tool and use it.
 
@@ -15,7 +15,7 @@ The following softwares should be installed on your system to run the toolkit.
 * Git
 * Docker
 
-Please execute the following lines to build and run the tool. 
+Please execute the following lines to build and run the tool.
 
 ```bash
 git clone https://github.com/mojaloop/ml-testing-toolkit
