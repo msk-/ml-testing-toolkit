@@ -200,6 +200,9 @@ const openApiBackendNotImplementedHandler = async (context, req, h, item) => {
     objectStore.push('requests', assertionPath, assertionData)
     MyEventEmitter.getEmitter('assertionRequest', req.customInfo.user).emit(assertionPath, assertionData)
   }
+  // Store all the inbound requests
+  objectStore.push('requestsHistory', req.method + ' ' + req.path, { headers: req.headers, body: req.payload })
+
   req.customInfo.specFile = item.specFile
   req.customInfo.jsfRefFile = item.jsfRefFile
   let responseBody, responseStatus
@@ -230,7 +233,7 @@ const openApiBackendNotImplementedHandler = async (context, req, h, item) => {
     responseStatus = +status
   }
   // Verify that it is a success code, then generate callback
-  if ((req.method === 'post' || req.method === 'get' || req.method === 'put') && responseStatus >= 200 && responseStatus <= 299) {
+  if (item.asynchronous && (req.method === 'post' || req.method === 'get' || req.method === 'put') && responseStatus >= 200 && responseStatus <= 299) {
     // Generate callback asynchronously
     setImmediate(generateAsyncCallback, item, context, req)
   }

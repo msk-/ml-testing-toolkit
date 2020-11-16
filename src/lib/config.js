@@ -57,7 +57,7 @@ const getStoredUserConfig = async (user) => {
 
 const setStoredUserConfig = async (newConfig, user) => {
   try {
-    await storageAdapter.upsert(USER_CONFIG_FILE, newConfig, user)
+    await storageAdapter.upsert(USER_CONFIG_FILE, { ...getUserConfig(), ...newConfig }, user)
     return true
   } catch (err) {
     return false
@@ -88,11 +88,22 @@ const loadSystemConfig = async () => {
   return true
 }
 
+const setSystemConfig = async (newConfig) => {
+  try {
+    await storageAdapter.upsert(SYSTEM_CONFIG_FILE, { ...getSystemConfig(), ...newConfig })
+    await loadSystemConfig()
+    return true
+  } catch (err) {
+    return false
+  }
+}
+
 module.exports = {
   getUserConfig: getUserConfig,
   getStoredUserConfig: getStoredUserConfig,
   setStoredUserConfig: setStoredUserConfig,
   loadUserConfig: loadUserConfig,
   getSystemConfig: getSystemConfig,
-  loadSystemConfig: loadSystemConfig
+  loadSystemConfig: loadSystemConfig,
+  setSystemConfig: setSystemConfig
 }

@@ -49,6 +49,31 @@ const logRequest = (request, user) => {
   })
 }
 
+const logOutboundRequest = (verbosity, message, externalData = {}) => {
+  externalData.notificationType = 'newOutboundLog'
+  if (externalData.additionalData) {
+    if (externalData.additionalData.request) {
+      externalData.additionalData.request = {
+        url: externalData.additionalData.request.url,
+        uniqueId: externalData.uniqueId,
+        headers: externalData.additionalData.request.headers,
+        queryParams: externalData.additionalData.request.query,
+        body: externalData.additionalData.request.payload || externalData.additionalData.request.data
+      }
+    } else if (externalData.additionalData.response) {
+      const response = externalData.additionalData.response
+      externalData.additionalData.response = {
+        status: response.status,
+        statusText: response.statusText,
+        uniqueId: externalData.uniqueId,
+        headers: response.headers,
+        body: response.payload || response.data
+      }
+    }
+  }
+  logMessage(verbosity, message, externalData)
+}
+
 const logResponse = (request, user) => {
   if (request.response) {
     const message = `Response: ${request.method} ${request.path} Status: ${request.response.statusCode}`
@@ -56,7 +81,8 @@ const logResponse = (request, user) => {
       additionalData: {
         response: {
           uniqueId: request.customInfo.uniqueId || null,
-          body: request.response.source
+          body: request.response.source,
+          status: request.response.statusCode
         }
       },
       user,
@@ -68,7 +94,7 @@ const logResponse = (request, user) => {
 
 const logMessage = (verbosity, message, externalData = {}) => {
   const data = {
-    additionalData: externalData.additionalData || null,
+    additionalData: externalData.additionalData,
     notification: typeof externalData.notification !== 'undefined' ? externalData.notification : true,
     messageType: externalData.messageType || 'generic',
     request: externalData.request || null,
@@ -92,10 +118,11 @@ const logMessage = (verbosity, message, externalData = {}) => {
 
   if (data.notification) {
     const log = {
-      uniqueId: (data.request && data.request.customInfo) ? data.request.customInfo.uniqueId : null,
-      traceID: (data.request && data.request.customInfo) ? data.request.customInfo.traceID : null,
-      resource: data.request ? { method: data.request.method, path: data.request.path } : null,
+      uniqueId: externalData.uniqueId || ((data.request && data.request.customInfo) ? data.request.customInfo.uniqueId : null),
+      traceID: externalData.traceID || ((data.request && data.request.customInfo) ? data.request.customInfo.traceID : null),
+      resource: externalData.resource || (data.request ? { method: data.request.method, path: data.request.path } : null),
       messageType: data.messageType,
+      notificationType: externalData.notificationType || 'newLog',
       verbosity,
       message,
       additionalData: data.additionalData,
@@ -114,7 +141,11 @@ const logMessage = (verbosity, message, externalData = {}) => {
     }
 
     const notificationEmitter = require('./notificationEmitter')
-    notificationEmitter.broadcastLog(log, sessionID)
+    if (log.notificationType === 'newOutboundLog') {
+      notificationEmitter.broadcastOutboundLog(log, sessionID)
+    } else {
+      notificationEmitter.broadcastLog(log, sessionID)
+    }
 
     if (hostingEnabled && data.user) {
       const dbAdapter = require('./db/adapters/dbAdapter')
@@ -125,6 +156,7 @@ const logMessage = (verbosity, message, externalData = {}) => {
 
 module.exports = {
   logRequest,
+  logOutboundRequest,
   logResponse,
   logMessage
 }

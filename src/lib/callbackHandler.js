@@ -23,21 +23,22 @@
  ******/
 
 const customLogger = require('./requestLogger')
-const Config = require('../lib/config')
+const Config = require('./config')
 const axios = require('axios').default
 const https = require('https')
 const objectStore = require('./objectStore')
 const MyEventEmitter = require('./MyEventEmitter')
 const JwsSigning = require('./jws/JwsSigning')
-const ConnectionProvider = require('../lib/configuration-providers/mb-connection-manager')
+const ConnectionProvider = require('./configuration-providers/mb-connection-manager')
 const traceHeaderUtils = require('./traceHeaderUtils')
+const UniqueIdGenerator = require('./uniqueIdGenerator')
 
 const handleCallback = async (callbackObject, context, req) => {
   if (callbackObject.delay) {
     await new Promise(resolve => setTimeout(resolve, callbackObject.delay))
   }
   const userConfig = await Config.getUserConfig(req.customInfo.user)
-
+  const uniqueId = UniqueIdGenerator.generateUniqueId(req)
   let callbackEndpoint = userConfig.CALLBACK_ENDPOINT
   if (Config.getSystemConfig().HOSTING_ENABLED) {
     const endpointsConfig = await ConnectionProvider.getEndpointsConfig()
@@ -82,7 +83,7 @@ const handleCallback = async (callbackObject, context, req) => {
     const tlsConfig = await ConnectionProvider.getTlsConfig()
     if (!tlsConfig.dfsps[callbackObject.callbackInfo.fspid]) {
       const errorMsg = 'Outbound TLS is enabled, but there is no TLS config found for DFSP ID: ' + callbackObject.callbackInfo.fspid
-      customLogger.logMessage('error', errorMsg, { request: req })
+      customLogger.logMessage('error', errorMsg, { request: req, notification: false })
       throw errorMsg
     }
     const httpsAgent = new https.Agent({
@@ -93,6 +94,12 @@ const handleCallback = async (callbackObject, context, req) => {
     })
     httpsProps.httpsAgent = httpsAgent
     urlGenerated = urlGenerated.replace('http:', 'https:')
+  } else {
+    if (urlGenerated.startsWith('https:')) {
+      httpsProps.httpsAgent = new https.Agent({
+        rejectUnauthorized: false
+      })
+    }
   }
 
   // Pass on the traceparent header if exists
@@ -141,12 +148,18 @@ const handleCallback = async (callbackObject, context, req) => {
   objectStore.push('callbacks', assertionPath, assertionData)
   MyEventEmitter.getEmitter('assertionCallback', req.customInfo.user).emit(assertionPath, assertionData)
 
+  // Store all the callbacks in callbacksHistory
+  objectStore.push('callbacksHistory', callbackObject.method + ' ' + callbackObject.path, { headers: callbackObject.headers, body: callbackObject.body })
+
   // Send callback
   if (userConfig.SEND_CALLBACK_ENABLE) {
+    customLogger.logOutboundRequest('info', 'Request: ' + reqOpts.method + ' ' + reqOpts.path, { additionalData: { request: reqOpts }, request: reqOpts, uniqueId })
     customLogger.logMessage('info', 'Sending callback ' + callbackObject.method + ' ' + reqOpts.url, { additionalData: callbackObject, request: req })
     axios(reqOpts).then((result) => {
+      customLogger.logOutboundRequest('info', 'Response: ' + reqOpts.method + ' ' + reqOpts.path, { additionalData: { response: result }, request: reqOpts, uniqueId })
       customLogger.logMessage('info', 'Received callback response ' + result.status + ' ' + result.statusText, { request: req })
     }, (err) => {
+      customLogger.logOutboundRequest('error', 'Response: ' + reqOpts.method + ' ' + reqOpts.path, { additionalData: err, request: reqOpts, uniqueId })
       customLogger.logMessage('error', 'Failed to send callback ' + callbackObject.method + ' ' + reqOpts.url, { additionalData: err.message, request: req })
     })
   } else {

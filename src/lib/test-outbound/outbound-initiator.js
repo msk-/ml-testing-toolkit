@@ -43,10 +43,12 @@ const openApiDefinitionsModel = require('../mocking/openApiDefinitionsModel')
 const uuid = require('uuid')
 const utilsInternal = require('../utilsInternal')
 const dbAdapter = require('../db/adapters/dbAdapter')
+const objectStore = require('../objectStore')
+const UniqueIdGenerator = require('../../lib/uniqueIdGenerator')
 
 var terminateTraceIds = {}
 
-const getTracing = (traceID) => {
+const getTracing = (traceID, dfspId) => {
   const tracing = {
     outboundID: traceID,
     sessionID: null
@@ -55,12 +57,15 @@ const getTracing = (traceID) => {
     tracing.outboundID = traceHeaderUtils.getEndToEndID(traceID)
     tracing.sessionID = traceHeaderUtils.getSessionID(traceID)
   }
+  if (Config.getSystemConfig().HOSTING_ENABLED) {
+    tracing.sessionID = dfspId
+  }
   return tracing
 }
 
 const OutboundSend = async (inputTemplate, traceID, dfspId) => {
   const startedTimeStamp = new Date()
-  const tracing = getTracing(traceID)
+  const tracing = getTracing(traceID, dfspId)
 
   const environmentVariables = {
     items: Object.entries(inputTemplate.inputValues || {}).map(([key, value]) => ({ type: 'any', key, value }))
@@ -163,7 +168,7 @@ const processTestCase = async (testCase, traceID, inputValues, environmentVariab
     const contextObj = await context.generageContextObj(environmentVariables.items)
     // Send http request
     try {
-      await executePreRequestScript(request, convertedRequest, scriptsExecution, contextObj, environmentVariables)
+      await executePreRequestScript(convertedRequest, scriptsExecution, contextObj, environmentVariables)
 
       environment.data = environmentVariables.items.reduce((envObj, item) => { envObj[item.key] = item.value; return envObj }, {})
 
@@ -208,9 +213,17 @@ const processTestCase = async (testCase, traceID, inputValues, environmentVariab
 }
 
 const setResponse = async (convertedRequest, resp, environment, environmentVariables, request, status, tracing, testCase, scriptsExecution, contextObj) => {
-  await executePostRequestScript(request, resp, scriptsExecution, contextObj, environmentVariables)
+  // Get the requestsHistory and callbacksHistory from the objectStore
+  const requestsHistoryObj = objectStore.get('requestsHistory')
+  const callbacksHistoryObj = objectStore.get('callbacksHistory')
+  const backgroundData = {
+    requestsHistory: requestsHistoryObj,
+    callbacksHistory: callbacksHistoryObj
+  }
+
+  await executePostRequestScript(convertedRequest, resp, scriptsExecution, contextObj, environmentVariables, backgroundData)
   environment.data = environmentVariables.items.reduce((envObj, item) => { envObj[item.key] = item.value; return envObj }, {})
-  const testResult = await handleTests(convertedRequest, resp.syncResponse, resp.callback, environment.data)
+  const testResult = await handleTests(convertedRequest, resp.syncResponse, resp.callback, environment.data, backgroundData)
   request.appended = {
     status: status,
     testResult,
@@ -239,27 +252,43 @@ const setResponse = async (convertedRequest, resp, environment, environmentVaria
   }
 }
 
-const executePreRequestScript = async (request, convertedRequest, scriptsExecution, contextObj, environmentVariables) => {
-  if (request.scripts && request.scripts.preRequest && request.scripts.preRequest.exec.length > 0 && request.scripts.preRequest.exec !== ['']) {
-    scriptsExecution.preRequest = await context.executeAsync(request.scripts.preRequest.exec, { context: { ...contextObj, request: convertedRequest }, id: uuid.v4() }, contextObj)
+const executePreRequestScript = async (convertedRequest, scriptsExecution, contextObj, environmentVariables) => {
+  if (convertedRequest.scripts && convertedRequest.scripts.preRequest && convertedRequest.scripts.preRequest.exec.length > 0 && convertedRequest.scripts.preRequest.exec !== ['']) {
+    scriptsExecution.preRequest = await context.executeAsync(convertedRequest.scripts.preRequest.exec, { context: { ...contextObj, request: convertedRequest }, id: uuid.v4() }, contextObj)
     environmentVariables.items = scriptsExecution.preRequest.environment
   }
 }
 
-const executePostRequestScript = async (request, resp, scriptsExecution, contextObj, environmentVariables) => {
-  if (request.scripts && request.scripts.postRequest && request.scripts.postRequest.exec.length > 0 && request.scripts.postRequest.exec !== ['']) {
+const executePostRequestScript = async (convertedRequest, resp, scriptsExecution, contextObj, environmentVariables, backgroundData) => {
+  if (convertedRequest.scripts && convertedRequest.scripts.postRequest && convertedRequest.scripts.postRequest.exec.length > 0 && convertedRequest.scripts.postRequest.exec !== ['']) {
     let response
     if (_.isString(resp)) {
       response = resp
     } else if (resp.syncResponse) {
-      response = { code: resp.syncResponse.status, status: resp.syncResponse.statusText, body: resp.syncResponse.data }
+      response = { code: resp.syncResponse.status, status: resp.syncResponse.statusText, body: resp.syncResponse.body || resp.syncResponse.data }
     }
-    scriptsExecution.postRequest = await context.executeAsync(request.scripts.postRequest.exec, { context: { ...contextObj, response }, id: uuid.v4() }, contextObj)
+
+    // Pass the requestsHistory and callbacksHistory to postman sandbox
+    const collectionVariables = []
+    collectionVariables.push(
+      {
+        type: 'any',
+        key: 'requestsHistory',
+        value: JSON.stringify(backgroundData.requestsHistory)
+      },
+      {
+        type: 'any',
+        key: 'callbacksHistory',
+        value: JSON.stringify(backgroundData.callbacksHistory)
+      }
+    )
+
+    scriptsExecution.postRequest = await context.executeAsync(convertedRequest.scripts.postRequest.exec, { context: { ...contextObj, response, collectionVariables }, id: uuid.v4() }, contextObj)
     environmentVariables.items = scriptsExecution.postRequest.environment
   }
 }
 
-const handleTests = async (request, response = null, callback = null, environment = []) => {
+const handleTests = async (request, response = null, callback = null, environment = {}, backgroundData = {}) => {
   try {
     const results = {}
     let passedCount = 0
@@ -303,6 +332,7 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
       const httpsProps = {}
       const user = dfspId ? { dfspId } : undefined
       const userConfig = await Config.getUserConfig(user)
+      const uniqueId = UniqueIdGenerator.generateUniqueId()
       let urlGenerated = userConfig.CALLBACK_ENDPOINT + path
       if (Config.getSystemConfig().HOSTING_ENABLED) {
         const endpointsConfig = await ConnectionProvider.getEndpointsConfig()
@@ -329,6 +359,12 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
           rejectUnauthorized: true
         })
         urlGenerated = urlGenerated.replace('http:', 'https:')
+      } else {
+        if (urlGenerated.startsWith('https:')) {
+          httpsProps.httpsAgent = new https.Agent({
+            rejectUnauthorized: false
+          })
+        }
       }
 
       const reqOpts = {
@@ -346,8 +382,9 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
       }
       try {
         await JwsSigning.sign(reqOpts)
+        customLogger.logOutboundRequest('info', 'JWS signed', { uniqueId, request: reqOpts })
       } catch (err) {
-        customLogger.logMessage('error', err.message, { additionalData: err, notification: false })
+        customLogger.logMessage('error', err.message, { additionalData: err })
       }
 
       var syncResponse = {}
@@ -363,17 +400,19 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
         MyEventEmitter.getEmitter('testOutbound', user).once(successCallbackUrl, (callbackHeaders, callbackBody) => {
           clearTimeout(timer)
           MyEventEmitter.getEmitter('testOutbound', user).removeAllListeners(errorCallbackUrl)
-          customLogger.logMessage('info', 'Received success callback ' + successCallbackUrl, { headers: callbackHeaders, body: callbackBody }, false)
+          customLogger.logMessage('info', 'Received success callback ' + successCallbackUrl, { request: { headers: callbackHeaders, body: callbackBody }, notification: false })
           resolve({ curlRequest: curlRequest, syncResponse: syncResponse, callback: { url: successCallbackUrl, headers: callbackHeaders, body: callbackBody } })
         })
         // Listen for error callback
         MyEventEmitter.getEmitter('testOutbound', user).once(errorCallbackUrl, (callbackHeaders, callbackBody) => {
           clearTimeout(timer)
           MyEventEmitter.getEmitter('testOutbound', user).removeAllListeners(successCallbackUrl)
-          customLogger.logMessage('info', 'Received error callback ' + errorCallbackUrl, { headers: callbackHeaders, body: callbackBody }, false)
+          customLogger.logMessage('info', 'Received error callback ' + errorCallbackUrl, { request: { headers: callbackHeaders, body: callbackBody }, notification: false })
           reject(new Error(JSON.stringify({ curlRequest: curlRequest, syncResponse: syncResponse, callback: { url: errorCallbackUrl, headers: callbackHeaders, body: callbackBody } })))
         })
       }
+
+      customLogger.logOutboundRequest('info', 'Sending request ' + reqOpts.method + ' ' + reqOpts.url, { additionalData: { request: reqOpts }, user, uniqueId, request: reqOpts })
 
       axios(reqOpts).then((result) => {
         syncResponse = {
@@ -385,12 +424,15 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
         curlRequest = result.request ? result.request.toCurl() : ''
 
         if (result.status > 299) {
+          customLogger.logOutboundRequest('error', 'Received response ' + result.status + ' ' + result.statusText, { additionalData: { response: result }, user, uniqueId, request: reqOpts })
           if (timer) {
             clearTimeout(timer)
             MyEventEmitter.getEmitter('testOutbound', user).removeAllListeners(successCallbackUrl)
             MyEventEmitter.getEmitter('testOutbound', user).removeAllListeners(errorCallbackUrl)
           }
           reject(new Error(JSON.stringify({ curlRequest: curlRequest, syncResponse })))
+        } else {
+          customLogger.logOutboundRequest('info', 'Received response ' + result.status + ' ' + result.statusText, { additionalData: { response: result }, user, uniqueId, request: reqOpts })
         }
 
         if (!successCallbackUrl || !errorCallbackUrl || ignoreCallbacks) {
@@ -398,8 +440,13 @@ const sendRequest = (baseUrl, method, path, queryParams, headers, body, successC
         }
         customLogger.logMessage('info', 'Received response ' + result.status + ' ' + result.statusText, { additionalData: result.data, notification: false, user })
       }, (err) => {
-        customLogger.logMessage('info', 'Failed to send request ' + method + ' Error: ' + err.message, { additionalData: err, notification: false, user })
-        reject(new Error(JSON.stringify({ errorCode: 4000 })))
+        syncResponse = {
+          status: 500,
+          statusText: err.message
+        }
+        customLogger.logOutboundRequest('error', 'Failed to send request ' + method + ' Error: ' + err.message, { additionalData: err, user, uniqueId, request: reqOpts })
+        customLogger.logMessage('error', 'Failed to send request ' + method + ' Error: ' + err.message, { additionalData: err, notification: false, user })
+        reject(new Error(JSON.stringify({ errorCode: 4000, syncResponse })))
       })
     })()
   })
