@@ -68,6 +68,11 @@ const parseJsTest = (filepath, src) => {
   // within each `it` function call, get every API request using the ML client lib
   // 3. find instances of that variable that are used to make/build a request
   const testCases = itCallExprPaths.map((itCallExprPath) => {
+    // Utilities
+    const itBody = itCallExprPath.get('arguments').get('1').get('body').get('body')
+    const traverseUpwardUntilTestBlock =
+      (p) => p.parentPath === itBody ? p : traverseUpwardUntilTestBlock(p.parentPath)
+
     // Get all requests made in the test
     const requestFunctionCalls = jsc(itCallExprPath)
       .find(jsc.CallExpression)
@@ -101,15 +106,71 @@ const parseJsTest = (filepath, src) => {
       //   id // TODO: this might be redundant, especially if we can replace the UI<->backend protocol with AST
       // }))
 
+    // TODO: Assert request args are of the correct form?
+    // - Remember, TTK UI users will probably want to modify the request parameters- _and_
+    //   developers will want to use normal JS functionality to modify requests, and use test
+    //   fixtures included from other files. Therefore the question becomes: what _is_ the correct
+    //   form?
+    // - We could write and run some code that destructures the request into the correct format..
+    //   maybe?
+    // - We could use some sort of assertion library with "any" or whatever, something like
+    //   expect({ a: b }).toEqual({ a: expect.any })
+    // - Do we need the request to have only literals in it? That seems a bit crazy- people will
+    //   want to use fixtures and other shared data. Should we resolve the values? What happens
+    //   when someone wants to change them? Do we allow that _only_ if they're literals? Any change
+    //   will go through a peer review process in any case, so if it's raised as part of said peer
+    //   review process, it'll be reviewed by a developer, so replacement of variables with
+    //   literals etc. can be managed by that process.
+    // - Naive, initial implementation shouldn't attempt to resolve variable definitions. This is a
+    //   pretty tricky problem to solve. So users _using_ TTK UI will just have to replace
+    //   variables with literals, or reuse variables. We _could_ provide a UI later on for
+    //   definition of shared data.
+    // - It would certainly be easier to push enforcing the form of the request into `sync-client`
+    //   (or whatever that ends up being called)- perhaps by having it take an openapi spec and
+    //   some config or something?
+    // - Is this type-checking? Is that something we should just ignore? It's a dynamic language,
+    //   after all..
+
     const assertions = jsc(itCallExprPath)
       .find(jsc.CallExpression)
       .filter((path) => path.value.callee.name === 'expect')
-      .map((path) => {
-        const parentIfIdNonNumeric = (p) => typeof p.name === 'number' ? p : parentIfIdNonNumeric(p.parentPath)
-        return parentIfIdNonNumeric(path)
-      })
       .paths()
-    assert(assertions.length > 0, 'Expected at least one assertion ("expect" function call) per test');
+    assert(assertions.length > 0, 'Expected at least one assertion ("expect" function call) per test')
+
+    // Here we identify the boundaries between requests and assertions. These boundaries correspond
+    // to "requests" in the parlance of TTK.
+    // Procedurally speaking, what we are doing here is looking for each sync-client request, then
+    // working backward to the closest preceding assertion (or the beginning of the test block).
+    // That assertion is the boundary that defines the end of the preceding TTK request and the
+    // beginning of the current TTK request.
+    const assertionExprStmts = assertions
+      .map(traverseUpwardUntilTestBlock)
+      .sort((m, n) => m.name - n.name);
+    const assertionExprStmtsRev = [...assertionExprStmts].reverse();
+    const requests = requestFunctionCalls
+      .map(traverseUpwardUntilTestBlock)
+      .map((reqPath) =>
+        assertionExprStmtsRev.find((assertion) => assertion.name < reqPath.name)?.name + 1 || 0
+      )
+      .map((start, i, arr) => ({
+        start,
+        end: (arr[i + 1] || itBody.value.length)
+      }))
+      // .map(({ start, end }) => itBody.slice(start, end))
+
+    console.log(requests);
+
+    // const attachMetadata = (type) => (path) => ({
+    //   path,
+    //   index: traverseUpwardUntilTestBlock(path).name,
+    //   type,
+    // })
+    // const requestsAndAssertions = [
+    //   ...requestFunctionCalls.map(attachMetadata('request')),
+    //   ...assertions.map(attachMetadata('assertion')),
+    // ].sort((m, n) => m.index - n.index)
+    // const boundaries = requestsAndAssertions.reduce((acc, v, i) => , [0])
+    // console.log(requestsAndAssertions.map(e => ({ ...e, path: summarise(e.path) })))
 
     // Extract the code between requests as the "scripts". For now, we'll do this naively and say
     // everything since the last assertion preceding the current request, until the current request
@@ -149,29 +210,6 @@ const parseJsTest = (filepath, src) => {
     //     // .. etc.
     //   })
     // Recursively split the body node array based on the aforementioned rules
-
-    // TODO: Assert request args are of the correct form?
-    // - Remember, TTK UI users will probably want to modify the request parameters- _and_
-    //   developers will want to use normal JS functionality to modify requests.
-    // - We could write and run some code that destructures the request into the correct format..
-    //   maybe?
-    // - We could use some sort of assertion library with "any" or whatever, something like
-    //   expect({ a: b }).toEqual({ a: expect.any })
-    // - Do we need the request to have only literals in it? That seems a bit crazy- people will
-    //   want to use fixtures and other shared data. Should we resolve the values? What happens
-    //   when someone wants to change them? Do we allow that _only_ if they're literals? Any change
-    //   will go through a peer review process in any case, so if it's raised as part of said peer
-    //   review process, it'll be reviewed by a developer, so replacement of variables with
-    //   literals etc. can be managed by that process.
-    // - Naive, initial implementation shouldn't attempt to resolve variable definitions. This is a
-    //   pretty tricky problem to solve. So users _using_ TTK UI will just have to replace
-    //   variables with literals, or reuse variables. We _could_ provide a UI later on for
-    //   definition of shared data.
-    // - It would certainly be easier to push enforcing the form of the request into `sync-client`
-    //   (or whatever that ends up being called)- perhaps by having it take an openapi spec and
-    //   some config or something?
-    // - Is this type-checking? Is that something we should just ignore? It's a dynamic language,
-    //   after all..
   })
 
   // const requests = itCallExprs.
