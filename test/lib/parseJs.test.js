@@ -35,6 +35,20 @@ describe('parseJsTest', () => {
     })
   })
 
+  it('asserts there is at least one request per test', () => {
+    const clientVarName = 'cli';
+    const src = [
+      `const ${clientVarName} = require('${mlSyncClientLibName}')`,
+      `describe('Server', () => {`,
+      `  it('starts', () => {`,
+      `  })`,
+      `})`,
+    ].join('\n')
+
+    expect(() => parseJsTest('whatever', src))
+      .toThrow(`Expected at least one request ("${clientVarName}" function call) per test`)
+  })
+
   it('asserts ML sync client variable is not shadowed', () => {
     const src = [
       `const cli = require('${mlSyncClientLibName}')`,
@@ -46,4 +60,25 @@ describe('parseJsTest', () => {
     expect(() => parseJsTest('whatever', src))
       .toThrow(/^Variable 'cli' cannot be shadowed or reused.*/)
   });
+
+  it('asserts there is at least one assertion per test', () => {
+    const src = [
+      `const cli = require('${mlSyncClientLibName}')`,
+      `describe('Server', () => {`,
+      `  it('starts', () => {`,
+      `    const fspiopRequest = {`,
+      `      whatever: 5,`,
+      `      blah: 6,`,
+      `    }`,
+      `    const resp1 = cli(fspiopRequest)`,
+      `  })`,
+      `})`,
+    ].join('\n')
+
+    expect(() => parseJsTest('whatever', src))
+      .toThrow(/^Expected at least one assertion \("expect" function call\) per test/)
+  })
+
 })
+
+// vim: et ts=2 sw=2
