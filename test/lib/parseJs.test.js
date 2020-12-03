@@ -79,6 +79,22 @@ describe('parseJsTest', () => {
       .toThrow(/^Expected at least one assertion \("expect" function call\) per test/)
   })
 
+  it('asserts the request supplied is an ObjectExpression', () => {
+    const src = [
+      `const cli = require('${mlSyncClientLibName}')`,
+      `describe('Server', () => {`,
+      `  it('starts', () => {`,
+      `    const fspiopRequest = otherObj`,
+      `    const resp1 = cli(fspiopRequest)`,
+      `    expect(anything)`,
+      `  })`,
+      `})`,
+    ].join('\n')
+
+    expect(() => parseJsTest('whatever', src))
+      .toThrow('Expected TTK request client argument to be an ObjectExpression')
+  })
+
 })
 
 // vim: et ts=2 sw=2
