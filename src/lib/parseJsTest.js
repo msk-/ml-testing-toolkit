@@ -2,6 +2,8 @@
 // A note about this code: every `assert` call here has a corresponding test. At the time of
 // writing, they're all in the same order in the tests as they are in this file.
 
+// TODO: high level documentation of this module
+
 const assert = require('assert').strict
 const jsc = require('jscodeshift')
 const Ajv = require('ajv').default
@@ -20,6 +22,9 @@ const {
 } = require('jsc-utils')
 const ajv = new Ajv({ allErrors: true })
 
+// TODO: move this to a different file?
+// TODO: a PUT or a POST must have a body, a GET must not- we will therefore need to expand this
+// definition. It could be worthwhile referencing the FSPIOP-API spec?
 const requestSchema = {
   "$id": "https://mojaloop.io/schemas/ttk/request.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -83,6 +88,7 @@ const requestValidator = ajv.compile(requestSchema, { strict: true })
 // built around a concept of a "TTK test" which contains some structure
 // We try to display useful failure messages to the user so they can rectify these
 // incompatibilities, and document here the reasons for such constraints.
+// TODO: high-level documentation about the test schema, why it is the way it is
 const parseJsTest = (filepath, src) => {
   const j = jsc(src)
 
@@ -91,7 +97,10 @@ const parseJsTest = (filepath, src) => {
   // ==========
   // 1. identify the call to `require('sync-client')`
   // 2. get the variable to which the `require` result was assigned
-  //   - TODO: handle the case where it's destructured, or disallow this
+  //   - TODO: handle the case where it's destructured, or disallow this. NOTE: if we're going to
+  //     rigorously apply constraints, we'd be better of specifying what _is_ allowed rather than
+  //     what _isn't_. And this might best be done by forking and extending an existing parser, or
+  //     an existing grammar.
   const mlSyncClientLibName = 'sync-client'
   const syncClientCalls = j.find(jsc.CallExpression)
     .filter((path) => astNodesAreEquivalent(
@@ -124,6 +133,9 @@ const parseJsTest = (filepath, src) => {
 
   // within each `it` function call, get every API request using the ML client lib
   // 3. find instances of that variable that are used to make/build a request
+  // TODO: this is basically a parser. Where assertions are made indicating problems with the test,
+  // this parser should let the user know exactly where the problem occurred, and what the problem
+  // was. Basically, it needs to produce better error messages.
   const testCases = itCallExprPaths.map((itCallExprPath) => {
     // Utilities
     const itBody = itCallExprPath.get('arguments').get('1').get('body').get('body')
@@ -150,6 +162,9 @@ const parseJsTest = (filepath, src) => {
         // TODO: what happens in the following case:
         //   const request = {}
         //   request.url = 'hahahaha now it\'s difficult isn\'t it?!'
+        // What about this one...
+        //   const request = {}
+        //   request.url = sideEffect('now we\'re in trouble')
         // we could perhaps detect any changes to properties.. eek.. check all
         // AssignmentExpressions in scope for a MemberExpression looking like modification of the
         // request object?
@@ -177,23 +192,18 @@ const parseJsTest = (filepath, src) => {
     //   when someone wants to change them? Do we allow that _only_ if they're literals? Any change
     //   will go through a peer review process in any case, so if it's raised as part of said peer
     //   review process, it'll be reviewed by a developer, so replacement of variables with
-    //   literals etc. can be managed by that process.
+    //   literals/fixtures etc. can be managed by that process.
     // - Naive, initial implementation shouldn't attempt to resolve variable definitions. This is a
     //   pretty tricky problem to solve. So users _using_ TTK UI will just have to replace
     //   variables with literals, or reuse variables. We _could_ provide a UI later on for
-    //   definition of shared data.
+    //   definition of shared data (i.e. fixtures).
     // - It would certainly be easier to push enforcing the form of the request into `sync-client`
     //   (or whatever that ends up being called)- perhaps by having it take an openapi spec and
     //   some config or something?
     // - Is this type-checking? Is that something we should just ignore? It's a dynamic language,
     //   after all..
-
-    const getAssertions = (coll) => coll
-      .find(jsc.CallExpression)
-      .filter((path) => path.value.callee.name === 'expect')
-      .paths()
-    const assertions = getAssertions(itBodyColl)
-    assert(assertions.length > 0, 'Expected at least one assertion ("expect" function call) per test')
+    // - On the other hand, the request itself needs to comply to an API spec for storage in the
+    //   TTK format. _Unless_ the TTK format becomes javascript tests.
 
     // Here we identify the boundaries between requests and assertions. These boundaries correspond
     // to "requests" in the parlance of TTK.
@@ -201,35 +211,46 @@ const parseJsTest = (filepath, src) => {
     // working backward to the closest preceding assertion (or the beginning of the test block).
     // That assertion is the boundary that defines the end of the preceding TTK request and the
     // beginning of the current TTK request.
-    const assertionExprStmtsRev = assertions
+    const getAssertions = (coll) => coll
+      .find(jsc.CallExpression)
+      .filter((path) => path.value.callee.name === 'expect')
+      .paths()
+    const assertionExprStmtsRev = getAssertions(itBodyColl)
       .map(traverseUpwardUntilTestBlock)
       .sort((m, n) => m.name - n.name)
       .reverse()
-    const requests = requestFunctionCalls
+    return requestFunctionCalls
       .map(traverseUpwardUntilTestBlock)
-      .map((reqPath) =>
+      .map((requestExprStmt) => ({
         // Find the start of the TTK request as the last assertion preceding the current request,
         // or zero as the first statement in the it block.
-        assertionExprStmtsRev.find((assertion) => assertion.name < reqPath.name)?.name + 1 || 0
-      )
-      .map((start, i, arr) => ({
-        // Turn the start into a start and end by using the start of the following request as the
-        // end of the current request. Return a half-open range [start,end).
-        start,
-        end: (arr[i + 1] || itBody.value.length)
+        requestExprStmt,
+        start: assertionExprStmtsRev.find((assertion) => assertion.name < requestExprStmt.name)?.name + 1 || 0
       }))
-      .map(({ start, end }) => jsc(Array.from(
+      .map(({ start, requestExprStmt }, i, arr) => ({
+        requestExprStmt,
+        // Turn the start into both a start and end by using the start of the following request as
+        // the end of the current request. Return a half-open range [start,end).
+        start,
+        end: (arr[i + 1]?.start || itBody.value.length)
+      }))
+      .map(({ start, end, requestExprStmt }) => ({
+        requestExprStmt,
         // Turn the start and end indices into a collection of NodePaths representing all nodes in
         // the request
-        { length: end - start },
-        (_, i) => itBody.get(`${i + start}`)
-      )))
-      .map((coll) => {
-        // Here we'll actually build a result in the TTK request format
-        const requests = getRequestFunctionCalls(coll)
+        topLevelRequestBodyPaths: Array.from(
+          { length: end - start },
+          (_, i) => itBody.get(`${i + start}`)
+        )
+      }))
+      .map(({ requestExprStmt, topLevelRequestBodyPaths }) => {
+        // Here we'll build the request argument in the TTK request format
+        const requests = getRequestFunctionCalls(jsc(topLevelRequestBodyPaths))
         // These two assertions are pretty difficult to trigger. In fact, they should be impossible
-        // to trigger, if the code is correct. We therefore do not have tests for these, but have
-        // them as runtime errors should they occur.
+        // to trigger, if this code is correct. We therefore do not have tests for these, but have
+        // them as runtime errors should they occur. This is because the topLevelRequestBodyPaths
+        // array should only contain a single request, which should therefore have only a single
+        // argument, by construction.
         assert(
           requests.length === 1,
           'Expected exactly one client request per TTK request. This is an internal logic error. Please raise an issue here: https://github.com/mojaloop/ml-testing-toolkit/issues',
@@ -263,59 +284,105 @@ const parseJsTest = (filepath, src) => {
               throw new Error(`Unhandled object type for ${summarise(objExpr)} when validating the request object`)
           }
         }
-        const requestObj = objExprToObjNaive(requestArgNode)
-        const validationResult = requestValidator(requestObj);
-        // TODO: better guidance on resolving these issues
+        const requestArg = objExprToObjNaive(requestArgNode)
+        // TODO: the message probably needs to contain better guidance on resolving these issues.
+        // Interpretation of the errors might be available in the ajv documentation, in which case
+        // we should link to it from the error message we print here. Otherwise, we might be able
+        // to translate the errors to more natural language errors. Or, there might be ajv
+        // functionality to do that, or a package available that will do that for us.
         assert(
-          requestValidator(requestObj),
+          requestValidator(requestArg),
           `Request object invalid. Errors: ${JSON.stringify(requestValidator.errors, null, 2)}`
         )
-        return requestObj
+        return {
+          requestExprStmt,
+          requestArg,
+          topLevelRequestBodyPaths,
+        }
       })
+      .map(({ requestArg, requestExprStmt, topLevelRequestBodyPaths, }) => {
+        // Break the request into
+        // - pre-request script, this will be all code before requestExprStmt
+        // - request, this is requestExprStmt
+        // - post-request script, this will be all code between requestExprStmt and the first
+        //   assertion
+        // - assertions, these must not contain any code other than expect function calls
+        // Note that by construction there should be no assertions before the request, and no code
+        // after the assertions.
 
-    console.log(requests)
+        // First, bisect/bucket the statements before and after requestExprStmt. This yields our
+        // pre-request script and all statements after the request.
+        const topLevelRequestBodyPathsSorted =
+          [...topLevelRequestBodyPaths].sort((m, n) => m.name - n.name)
+        const preRequestScript = topLevelRequestBodyPathsSorted.filter(
+          (path) => path.name < requestExprStmt.name
+        )
+        const rest = topLevelRequestBodyPathsSorted.filter(
+          (path) => path.name > requestExprStmt.name
+        )
 
-    // Extract the code between requests as the "scripts". For now, we'll do this naively and say
-    // everything since the last assertion preceding the current request, until the current request
-    // is a "pre-request" "script". Any assertions between the current request and the subsequent
-    // request are assertions associated with that request. And any code that occurs between the
-    // current request and that last assertion is a "post-request" "script"- we'll strip all of the
-    // assertions out of these "scripts".
-    // Example:
-    //   const client = require('sync-client')
-    //   it('makes a quote request', () => {
-    //     // pre-request script begins:
-    //     const getParty = {
-    //       method: 'get',
-    //       url: 'mojaloop.io',
-    //       operationPath: '/parties/MSISDN/12345',
-    //       ... etc.
-    //     }
-    //     console.log(getParty)
-    //     // pre-request script ends
-    //     // request:
-    //     const resp = client(getParty)
-    //     // post-request script begins
-    //     expect(resp).toBe('whatever')
-    //     console.log(resp)
-    //     const derivativeOfResponse = deriveSomethingFrom(resp)
-    //     const derivativeOfRequest = deriveSomethingFrom(getParty)
-    //     expect(derivativeOfRequest).toEqual(derivativeOfResponse)
-    //     // post-request script ends
-    //     // next pre-request script begins
-    //     const postQuote = {
-    //       method: 'post',
-    //       url: 'mojaloop.io',
-    //       operationPath: '/quotes',
-    //       ... etc.
-    //     }
-    //     console.log(postQuote)
-    //     // .. etc.
-    //   })
-    // Recursively split the body node array based on the aforementioned rules
+        // Bisect the statements after the request into everything before the first assertion, and
+        // everything else.
+        const isAssertion = (path) => /^expect\(.*/.test(summarise(path))
+        const firstAssertion = rest.findIndex(isAssertion)
+        const postRequestScript = firstAssertion > -1 ? rest.slice(0, firstAssertion) : rest
+        const assertions = firstAssertion > -1 ? rest.slice(firstAssertion) : []
+        // Assert that everything in the assertions array is an assertion. Note that the
+        // consequence of this is that a test must not contain any code that is not assertions once
+        // the assertions begin, _at the same AST level as the assertions. This is a pretty
+        // arbitrary restriction, as we will see:
+        // Disallowed code:
+        //   expect('something').toBe('something')
+        //   const intermediate = complicated.transformation(obj).sequence().transform()
+        //   const result = transformMore(intermediate)
+        //   expect(result).toBe(expectedThing)
+        // Allowed code:
+        //   expect('something').toBe('something')
+        //   expect(result).toBe(
+        //     transformMore(
+        //       complicated.transformation(obj).sequence().transform()
+        //     )
+        //   )
+        // It is quite possible to move `intermediate` and `result` before all assertions, but that
+        // moves the definition further from where it's used, which can be unpleasant for a reader.
+        // A less constrained model that would probably result in a _better_ experience in the UI
+        // rather than a worse one, would be a concept of "pre-assertion scripts". We could go so
+        // far as to constrain what is available in "pre-assertion scripts", for example to ensure
+        // that "pre-assertion scripts" only declared new intermediate variables. Note however that
+        // it might not be possible to distinguish between a "pre-assertion script" and a
+        // "post-request script". Perhaps this is all futile. Or perhaps all "post-request scripts"
+        // are in fact just "pre-assertion scripts". Something that would not be classified as part
+        // of a "pre-assertion script": any necessary cleanup. This could in fact be the name of a
+        // new section that occurs after all assertions.
+        assert(
+          assertions.every(isAssertion),
+          'Expected no code except assertions between the first assertion and the end of the request'
+        )
+
+        return {
+          ...requestArg,
+          tests: {
+            assertions: assertions.map((path, id) => ({
+              id,
+              exec: [summarise(path)],
+              description: '', // TODO: we could (1) autogenerate this (2) take it from the final expect parameter (3) ignore it
+            }))
+          },
+          scripts: {
+            preRequest: {
+              exec: jsc(preRequestScript).toSource().split('\n')
+            },
+            postRequest: {
+              exec: jsc(postRequestScript).toSource().split('\n')
+            },
+          },
+        }
+      })
   })
 
-  // const requests = itCallExprs.
+  return {
+    test_cases: testCases
+  }
 
   return {
     name: filepath,
@@ -323,9 +390,11 @@ const parseJsTest = (filepath, src) => {
     //
     // 1 Tricky, because these can be nested multiple "describe" calls deep. So, what will we do
     //   about this? Nothing? Enforce describe depth = 1? Are describe calls optional?
-    // 2 What's the other nomenclature available? Is it describe/test?
+    // 2 Should we support describe/it and describe/test, or prescribe one or the other?
     // 3 How do we handle the fact that javascript is probably considerably more flexible than
-    //   we're likely willing to handle here?
+    //   we're likely willing to handle here? Specifically, our ad-hoc collection of constraints
+    //   are likely to be subverted by enterprising test writers, and the best reliable way to get
+    //   around that is likely to be to fork an existing parser. (See earlier note about parser).
     // 4 How will we handle things that go on outside the `it` calls? For example, `beforeEach`,
     //   `afterEach`, `beforeAll`, `afterAll`? Display each of them in a "setup" block?
     // 5 Likely we ignore (3) and (4). Examining some of the existing tests: the actual bulk of the
