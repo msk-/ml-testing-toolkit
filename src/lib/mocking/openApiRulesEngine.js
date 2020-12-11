@@ -33,7 +33,8 @@ const Config = require('../config')
 const objectStore = require('../objectStore')
 const utilsInternal = require('../utilsInternal')
 const uuid = require('uuid')
-const postmanContext = require('../test-outbound/context')
+const postmanContext = require('../scripting-engines/postman-sandbox')
+const { OpenApiMockGenerator } = require('ml-testing-toolkit-shared-lib')
 
 // const jsfRefFilePathPrefix = 'spec_files/jsf_ref_files/'
 
@@ -51,7 +52,7 @@ const executeScripts = async (curEvent, req) => {
     // convert inboundEnvironment from JSON to sandbox environment format
     const sandboxEnvironment = Object.entries(objectStore.get('inboundEnvironment')).map((item) => { return { type: 'any', key: item[0], value: item[1] } })
 
-    const contextObj = await postmanContext.generageContextObj(sandboxEnvironment)
+    const contextObj = await postmanContext.generateContextObj(sandboxEnvironment)
 
     const postmanRequest = {
       body: JSON.stringify(req.payload),
@@ -75,7 +76,7 @@ const executeScripts = async (curEvent, req) => {
     const postmanSandbox = await postmanContext.executeAsync(curEvent.params.scripts.exec, { context: { ...contextObj, request: postmanRequest, globals }, id: uuid.v4() }, contextObj)
 
     // replace inbound environment with the sandbox environment
-    const mergedInboundEnvironment = postmanSandbox.environment.reduce((envObj, item) => { envObj[item.key] = item.value; return envObj }, {})
+    const mergedInboundEnvironment = postmanSandbox.environment
     objectStore.set('inboundEnvironment', mergedInboundEnvironment)
     contextObj.ctx.dispose()
     contextObj.ctx = null
@@ -146,7 +147,7 @@ const validateRules = async (context, req) => {
 
 const generateMockErrorCallback = async (context, req) => {
   const generatedErrorCallback = {}
-  const callbackGenerator = new (require('./openApiRequestGenerator'))()
+  const callbackGenerator = new OpenApiMockGenerator()
   await callbackGenerator.load(path.join(req.customInfo.specFile))
   let jsfRefs1 = []
   if (req.customInfo.jsfRefFile) {
@@ -230,7 +231,7 @@ const callbackRules = async (context, req) => {
       generatedCallback.headers = await replaceVariablesFromRequest(curEvent.params.headers, context, req)
     } else if (curEvent.type === 'MOCK_CALLBACK') {
       if (req.customInfo.specFile) {
-        const callbackGenerator = new (require('./openApiRequestGenerator'))()
+        const callbackGenerator = new OpenApiMockGenerator()
         await callbackGenerator.load(path.join(req.customInfo.specFile))
         let jsfRefs1 = []
         if (req.customInfo.jsfRefFile) {
@@ -299,7 +300,7 @@ const responseRules = async (context, req) => {
       generatedResponse.status = +curEvent.params.statusCode
     } else if (curEvent.type === 'MOCK_RESPONSE') {
       if (req.customInfo.specFile) {
-        const responseGenerator = new (require('./openApiRequestGenerator'))()
+        const responseGenerator = new OpenApiMockGenerator()
         await responseGenerator.load(path.join(req.customInfo.specFile))
         let jsfRefs1 = []
         if (req.customInfo.jsfRefFile) {
