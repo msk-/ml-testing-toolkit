@@ -1,6 +1,7 @@
 
-// A note about this code: every `assert` call here has a corresponding test. At the time of
-// writing, they're all in the same order in the tests as they are in this file.
+// A note about this code: unless otherwise mentioned, every `assert` call here has a corresponding
+// test. At the time of writing, they're all in the same order in the tests as they are in this
+// file.
 
 // TODO: high level documentation of this module
 
@@ -154,7 +155,7 @@ const parseJsTest = (filepath, src) => {
       `Expected at least one request ("${syncClientIdentifier}" function call) per test`
     )
 
-    const getRequestArgs = (coll) => coll
+    const getRequestArgs = (requestFunctionCalls) => requestFunctionCalls
       .map((syncClientFunctionCall) => syncClientFunctionCall.get('arguments').get('0'))
       .map((syncClientFunctionArg) =>
         // If the argument is a POJO, then we'll return it, otherwise find where it's defined and
@@ -267,16 +268,22 @@ const parseJsTest = (filepath, src) => {
           // TODO:
           //   short term: need to provide more guidance to the user on this
           //   medium term: need to do better resolution of the object supplied here, in order to
-          //     support things like fixtures
+          //     support things like fixtures. Or perhaps worse resolution- are we type checking a
+          //     dynamically typed lang here?
           'Expected TTK request client argument to be an ObjectExpression'
         )
-        // TODO: currently this only allows POJOs constructed with literals. No references or
-        // anything of the sort. Needs work.
+        // TODO: currently this only allows POJOs constructed with literals. No variable references
+        // or anything of the sort, therefore no fixtures. Needs work. Likely to be challenging.
         const objExprToObjNaive = (objExpr) => {
           switch (objExpr.type) {
             case 'ObjectExpression':
               return Object.fromEntries(
-                objExpr.properties.map((prop) => ([ prop.key.name, objExprToObjNaive(prop.value) ]))
+                objExpr.properties.map((prop) => ([
+                  // prop.key.name when the object is like { some: 'value' }
+                  // prop.key.value when the object is like { 'some': 'value' }
+                  prop.key.name || prop.key.value,
+                  objExprToObjNaive(prop.value)
+                ]))
               )
             case 'Literal':
               return objExpr.value
@@ -285,14 +292,10 @@ const parseJsTest = (filepath, src) => {
           }
         }
         const requestArg = objExprToObjNaive(requestArgNode)
-        // TODO: the message probably needs to contain better guidance on resolving these issues.
-        // Interpretation of the errors might be available in the ajv documentation, in which case
-        // we should link to it from the error message we print here. Otherwise, we might be able
-        // to translate the errors to more natural language errors. Or, there might be ajv
-        // functionality to do that, or a package available that will do that for us.
+        const errorOpts = { separator: '\n- ', dataVar: 'Request object' }
         assert(
           requestValidator(requestArg),
-          `Request object invalid. Errors: ${JSON.stringify(requestValidator.errors, null, 2)}`
+          `Request object invalid. Errors:\n- ${ajv.errorsText(requestValidator.errors, errorOpts)}`
         )
         return {
           requestExprStmt,
@@ -359,6 +362,12 @@ const parseJsTest = (filepath, src) => {
           'Expected no code except assertions between the first assertion and the end of the request'
         )
 
+        // Collection.toSource returns an array or a string depending on whether the collection
+        // contains multiple paths, or a single path. Therefore, we handle both result types by
+        // wrapping the result in an array and flattening it, joining any number of paths with a
+        // line break, then splitting on line breaks, because a single path might contain line
+        // breaks.
+        const toSource = (nodePaths) => [jsc(nodePaths).toSource()].flat().join('\n').split('\n')
         return {
           ...requestArg,
           tests: {
@@ -370,10 +379,10 @@ const parseJsTest = (filepath, src) => {
           },
           scripts: {
             preRequest: {
-              exec: jsc(preRequestScript).toSource().split('\n')
+              exec: toSource(preRequestScript),
             },
             postRequest: {
-              exec: jsc(postRequestScript).toSource().split('\n')
+              exec: toSource(postRequestScript),
             },
           },
         }

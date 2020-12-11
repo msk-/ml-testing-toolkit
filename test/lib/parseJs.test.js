@@ -1,16 +1,18 @@
 
 const parseJsTest = require('../../src/lib/parseJsTest')
-const src = [
-  `const whatever = require('sync-client')`,
-  ``,
-  `describe('Server', () => {`,
-  `  it('starts', () => {`,
-  `    const fspiopRequest = {`,
-  ``,
-  `    }`,
-  `  })`,
-  `})`,
-].join('\n')
+const defaultSyncClientRequest = JSON.stringify({
+  operationPath: 'whatever',
+  method: 'get',
+  headers: {},
+  params: {},
+  apiVersion: {
+    minorVersion: 1,
+    majorVersion: 0,
+    type: 'fspiop',
+    asynchronous: false,
+  },
+  url: 'whatever',
+})
 
 describe('parseJsTest', () => {
   const mlSyncClientLibName = 'sync-client'
@@ -35,8 +37,40 @@ describe('parseJsTest', () => {
     })
   })
 
+  it('asserts ML sync client variable is not shadowed', () => {
+    const src = [
+      `const cli = require('${mlSyncClientLibName}')`,
+      `{`,
+      `  const cli = 'can\\'t touch this'`,
+      `}`
+    ].join('\n')
+
+    expect(() => parseJsTest('whatever', src))
+      .toThrow(/^Variable 'cli' cannot be shadowed or reused.*/)
+  })
+
+  it('asserts it is possible to bind the ML sync client to a different name', () => {
+    const varName = Array.from(
+      { length: 10 },
+      () => String.fromCharCode(Math.floor(Math.random() * 26) + 97)
+    ).join('')
+    const src = [
+      `const ${varName} = require('${mlSyncClientLibName}')`,
+      `describe('Server', () => {`,
+      `  it('starts', () => {`,
+      `    const fspiopRequest = ${defaultSyncClientRequest}`,
+      `    const resp1 = ${varName}(fspiopRequest)`,
+      `    expect(anything)`,
+      `  })`,
+      `})`,
+    ].join('\n')
+
+    expect(() => parseJsTest('whatever', src))
+      .not.toThrow()
+  })
+
   it('asserts there is at least one request per test', () => {
-    const clientVarName = 'cli';
+    const clientVarName = 'cli'
     const src = [
       `const ${clientVarName} = require('${mlSyncClientLibName}')`,
       `describe('Server', () => {`,
@@ -49,52 +83,67 @@ describe('parseJsTest', () => {
       .toThrow(`Expected at least one request ("${clientVarName}" function call) per test`)
   })
 
-  it('asserts ML sync client variable is not shadowed', () => {
-    const src = [
-      `const cli = require('${mlSyncClientLibName}')`,
-      `{`,
-      `  const cli = 'can\\'t touch this'`,
-      `}`
-    ].join('\n')
+  describe('the request parameters are as required', () => {
+    it('asserts the request supplied is an ObjectExpression', () => {
+      const src = [
+        `const cli = require('${mlSyncClientLibName}')`,
+        `describe('Server', () => {`,
+        `  it('starts', () => {`,
+        `    const fspiopRequest = otherObj`,
+        `    const resp1 = cli(fspiopRequest)`,
+        `    expect(anything)`,
+        `  })`,
+        `})`,
+      ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
-      .toThrow(/^Variable 'cli' cannot be shadowed or reused.*/)
-  });
+      expect(() => parseJsTest('whatever', src))
+        .toThrow('Expected TTK request client argument to be an ObjectExpression')
+    })
 
-  it('asserts there is at least one assertion per test', () => {
-    const src = [
-      `const cli = require('${mlSyncClientLibName}')`,
-      `describe('Server', () => {`,
-      `  it('starts', () => {`,
-      `    const fspiopRequest = {`,
-      `      whatever: 5,`,
-      `      blah: 6,`,
-      `    }`,
-      `    const resp1 = cli(fspiopRequest)`,
-      `  })`,
-      `})`,
-    ].join('\n')
+    it('asserts the request supplied is of the correct form', () => {
+      const src = [
+        `const cli = require('${mlSyncClientLibName}')`,
+        `describe('Server', () => {`,
+        `  it('starts', () => {`,
+        `    const fspiopRequest = {}`,
+        `    const resp1 = cli(fspiopRequest)`,
+        `    expect(anything)`,
+        `  })`,
+        `})`,
+      ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
-      .toThrow(/^Expected at least one assertion \("expect" function call\) per test/)
+      const msg = [
+        'Request object invalid. Errors:',
+        '- Request object should have required property \'operationPath\'',
+        '- Request object should have required property \'method\'',
+        '- Request object should have required property \'headers\'',
+        '- Request object should have required property \'params\'',
+        '- Request object should have required property \'apiVersion\'',
+        '- Request object should have required property \'url\'',
+      ].join('\n')
+
+      expect(() => parseJsTest('whatever', src))
+        .toThrow(msg)
+    })
   })
 
-  it('asserts the request supplied is an ObjectExpression', () => {
+  it('asserts there is no code between assertions', () => {
     const src = [
       `const cli = require('${mlSyncClientLibName}')`,
       `describe('Server', () => {`,
       `  it('starts', () => {`,
-      `    const fspiopRequest = otherObj`,
+      `    const fspiopRequest = ${defaultSyncClientRequest}`,
       `    const resp1 = cli(fspiopRequest)`,
+      `    expect(anything)`,
+      `    console.log('blah')`,
       `    expect(anything)`,
       `  })`,
       `})`,
     ].join('\n')
 
     expect(() => parseJsTest('whatever', src))
-      .toThrow('Expected TTK request client argument to be an ObjectExpression')
+      .toThrow('Expected no code except assertions between the first assertion and the end of the request')
   })
-
 })
 
 // vim: et ts=2 sw=2
