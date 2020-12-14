@@ -90,7 +90,7 @@ const requestValidator = ajv.compile(requestSchema, { strict: true })
 // We try to display useful failure messages to the user so they can rectify these
 // incompatibilities, and document here the reasons for such constraints.
 // TODO: high-level documentation about the test schema, why it is the way it is
-const parseJsTest = (filepath, src) => {
+const jsToTtk = (filepath, src) => {
   const j = jsc(src)
 
   // ==========
@@ -465,6 +465,17 @@ const parseJsTest = (filepath, src) => {
   }
 }
 
-module.exports = parseJsTest
+const ttkToAst = (ttkTest) => {
+
+}
+
+const ttkToJs = (ttkTest) => {
+
+}
+
+module.exports = {
+  jsToTtk,
+  ttkToJs,
+}
 
 // vim: et ts=2 sw=2

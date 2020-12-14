@@ -1,5 +1,5 @@
 
-const parseJsTest = require('../../src/lib/parseJsTest')
+const { jsToTtk } = require('../../src/lib/jsTest')
 const defaultSyncClientRequest = JSON.stringify({
   operationPath: 'whatever',
   method: 'get',
@@ -14,13 +14,13 @@ const defaultSyncClientRequest = JSON.stringify({
   url: 'whatever',
 })
 
-describe('parseJsTest', () => {
+describe('jsToTtk', () => {
   const mlSyncClientLibName = 'sync-client'
   describe('asserts ML sync client is required exactly once', () => {
     it('asserts missing ML sync client throws', () => {
       const src = ''
 
-      expect(() => parseJsTest('whatever', src))
+      expect(() => jsToTtk('whatever', src))
         .toThrow(`Expecting require(${mlSyncClientLibName}) exactly once per file`)
     })
 
@@ -32,7 +32,7 @@ describe('parseJsTest', () => {
         `}`,
       ].join('\n')
 
-      expect(() => parseJsTest('whatever', src))
+      expect(() => jsToTtk('whatever', src))
         .toThrow(`Expecting require(${mlSyncClientLibName}) exactly once per file`)
     })
   })
@@ -45,7 +45,7 @@ describe('parseJsTest', () => {
       `}`
     ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
+    expect(() => jsToTtk('whatever', src))
       .toThrow(/^Variable 'cli' cannot be shadowed or reused.*/)
   })
 
@@ -65,7 +65,7 @@ describe('parseJsTest', () => {
       `})`,
     ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
+    expect(() => jsToTtk('whatever', src))
       .not.toThrow()
   })
 
@@ -79,7 +79,7 @@ describe('parseJsTest', () => {
       `})`,
     ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
+    expect(() => jsToTtk('whatever', src))
       .toThrow(`Expected at least one request ("${clientVarName}" function call) per test`)
   })
 
@@ -96,7 +96,7 @@ describe('parseJsTest', () => {
         `})`,
       ].join('\n')
 
-      expect(() => parseJsTest('whatever', src))
+      expect(() => jsToTtk('whatever', src))
         .toThrow('Expected TTK request client argument to be an ObjectExpression')
     })
 
@@ -122,7 +122,7 @@ describe('parseJsTest', () => {
         '- Request object should have required property \'url\'',
       ].join('\n')
 
-      expect(() => parseJsTest('whatever', src))
+      expect(() => jsToTtk('whatever', src))
         .toThrow(msg)
     })
   })
@@ -141,7 +141,7 @@ describe('parseJsTest', () => {
       `})`,
     ].join('\n')
 
-    expect(() => parseJsTest('whatever', src))
+    expect(() => jsToTtk('whatever', src))
       .toThrow('Expected no code except assertions between the first assertion and the end of the request')
   })
 })

@@ -25,7 +25,7 @@ const { readRecursiveAsync } = require('./utils')
 const fs = require('fs').promises
 const path = require('path')
 const jsc = require('jscodeshift')
-const parseJsTest = require('./parseJsTest')
+const { jsToTtk } = require('./jsTest')
 
 const bySuffix = (suffixes) => (filename) => suffixes.some(suffix => filename.endsWith(suffix))
 const getFiles = async (path, suffixes) => (await readRecursiveAsync(path)).filter(bySuffix(suffixes))
@@ -90,7 +90,7 @@ const parseCollection = (filepath, fileContent) => {
   const ext = path.extname(filepath);
   switch (ext) {
     case '.js':
-      return parseJsTest(fileContent)
+      return jsToTtk(fileContent)
     case '.json':
       return JSON.parse(fileContent)
     default:
