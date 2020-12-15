@@ -67,6 +67,7 @@
     "@types/socket.io": "^2.1.4",
     "adm-zip": "^0.4.14",
     "ajv": "^7.0.0-beta.9",
+    "astring": "^1.4.3",
     "atob": "2.1.2",
     "aws-sdk": "^2.751.0",
     "axios": "^0.19.2",

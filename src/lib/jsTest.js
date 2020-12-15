@@ -5,6 +5,15 @@
 
 // TODO: high level documentation of this module
 
+// Why use acorn here instead of recast? Primarily for deliberate incompatibility with jscodeshift.
+// Because jscodeshift requires recast as a dependency, instead of a peer dependency, the only way
+// for us to ensure compatibility of a recast dependency we use with the one used by jscodeshift is
+// by manually inspecting the version used by jscodeshift (and even then npm may not be guaranteed
+// to install the same version)
+// const acorn = require('acorn')
+const recast = require('recast')
+const build = recast.types.builders;
+const escodegen = require('astring')
 const assert = require('assert').strict
 const jsc = require('jscodeshift')
 const Ajv = require('ajv').default
@@ -465,16 +474,143 @@ const jsToTtk = (filepath, src) => {
   }
 }
 
-const ttkToAst = (ttkTest) => {
+const ttkRequestToItBlock = (ttkRequest) =>
+  build.expressionStatement(
+    build.callExpression(
+      build.identifier('it'),
+      [
+        build.literal(ttkRequest.description),
+        build.arrowFunctionExpression(
+          [],
+          build.blockStatement([
+            ...recast.parse(ttkRequest.scripts?.preRequest?.exec.join('\n') || '').program.body,
+            build.variableDeclaration(
+              "const",
+              [
+                build.variableDeclarator(
+                  build.identifier('apiResult'),
+                  build.objectExpression([
+                    build.property(
+                      'init',
+                      build.identifier('operationPath'),
+                      build.literal(ttkRequest.operationPath)
+                    ),
+                    build.property(
+                      'init',
+                      build.identifier('method'),
+                      build.literal(ttkRequest.method),
+                    ),
+                    build.property(
+                      'init',
+                      build.identifier('headers'),
+                      build.objectExpression(
+                        Object.entries(ttkRequest.headers).map(([k, v]) =>
+                          build.property(
+                            'init',
+                            build.literal(k),
+                            build.literal(v)
+                          )
+                        )
+                      ),
+                    ),
+                    build.property(
+                      'init',
+                      build.identifier('params'),
+                      build.objectExpression(
+                        Object.entries(ttkRequest.params || {}).map(([k, v]) =>
+                          build.property(
+                            'init',
+                            build.literal(k),
+                            build.literal(v)
+                          )
+                        )
+                      ),
+                    ),
+                    build.property(
+                      'init',
+                      build.identifier('apiVersion'),
+                      build.objectExpression([
+                        build.property(
+                          'init',
+                          build.identifier('minorVersion'),
+                          build.literal(ttkRequest.apiVersion.minorVersion)
+                        ),
+                        build.property(
+                          'init',
+                          build.identifier('majorVersion'),
+                          build.literal(ttkRequest.apiVersion.majorVersion)
+                        ),
+                        build.property(
+                          'init',
+                          build.identifier('type'),
+                          build.literal(ttkRequest.apiVersion.type)
+                        ),
+                        build.property(
+                          'init',
+                          build.identifier('asynchronous'),
+                          build.literal(ttkRequest.apiVersion.asynchronous)
+                        ),
+                      ])
+                    ),
+                    build.property(
+                      'init',
+                      build.identifier('url'),
+                      build.literal(ttkRequest.url),
+                    ),
+                  ])
+                )
+              ]
+            ),
+            ...recast.parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').program.body,
+            ...ttkRequest.tests.assertions.map(
+              (test) => {
+                const ast = recast.parse(test.exec.join('\n')).program.body
+                ast[0].comments = [
+                  build.commentLine(
+                    `${test.description}`,
+                    true,
+                    false,
+                  )
+                ]
+                return ast
+              }
+            ).flat()
+          ])
+        )
+      ]
+    )
+  )
 
-}
+const testCaseToDescribeBlock = (ttkTestCase) =>
+  build.expressionStatement(
+    build.callExpression(
+      build.identifier('describe'),
+      [
+        build.literal(ttkTestCase.name),
+        build.arrowFunctionExpression(
+          [],
+          build.blockStatement(ttkTestCase.requests.map(ttkRequestToItBlock))
+        )
+      ]
+    )
+  )
 
-const ttkToJs = (ttkTest) => {
+const ttkToAst = (ttkJson) =>
+  build.file(
+    build.program(
+      ttkJson.test_cases.map(testCaseToDescribeBlock)
+    ),
+    ttkJson.name
+  )
 
-}
+const ttkToJs = (ttkJson) => escodegen.generate(
+  ttkToAst(ttkJson).program,
+  { comments: true }
+)
 
 module.exports = {
   jsToTtk,
+  ttkToAst,
   ttkToJs,
 }
 
