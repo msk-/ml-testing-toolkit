@@ -31,7 +31,7 @@ const { promisify } = require('util')
 const objectStore = require('../objectStore')
 const slackBroadcast = require('../extras/slack-broadcast')
 const TemplateGenerator = require('../utils/templateGenerator')
-const { TraceHeaderUtils } = require('ml-testing-toolkit-shared-lib')
+const { TraceHeaderUtils } = require('@mojaloop/ml-testing-toolkit-shared-lib')
 
 const bar = new cliProgress.SingleBar({}, cliProgress.Presets.shades_classic)
 

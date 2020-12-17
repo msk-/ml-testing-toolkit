@@ -1,4 +1,4 @@
-const { FolderParser } = require('ml-testing-toolkit-shared-lib')
+const { FolderParser } = require('@mojaloop/ml-testing-toolkit-shared-lib')
 const { readFileAsync, readRecursiveAsync, fileStatAsync } = require('../../lib/utils')
 
 const getFileData = async (fileToRead, fileStat) => {
