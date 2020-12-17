@@ -36,7 +36,7 @@ const OpenApiMockHandler = require('./lib/mocking/openApiMockHandler')
 const UniqueIdGenerator = require('./lib/uniqueIdGenerator')
 const objectStore = require('./lib/objectStore')
 const ConnectionProvider = require('./lib/configuration-providers/mb-connection-manager')
-const { TraceHeaderUtils } = require('ml-testing-toolkit-shared-lib')
+const { TraceHeaderUtils } = require('@mojaloop/ml-testing-toolkit-shared-lib')
 
 var serverInstance = null
 // const openAPIOptions = {
