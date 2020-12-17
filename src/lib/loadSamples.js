@@ -21,38 +21,35 @@
  * Georgi Logodazhki <georgi.logodazhki@modusbox.com> (Original Author)
  --------------
  ******/
-const { readRecursiveAsync } = require('./utils')
-const fs = require('fs').promises
-const path = require('path')
-const jsc = require('jscodeshift')
-const { jsToTtk } = require('./jsTest')
-
-const bySuffix = (suffixes) => (filename) => suffixes.some(suffix => filename.endsWith(suffix))
-const getFiles = async (path, suffixes) => (await readRecursiveAsync(path)).filter(bySuffix(suffixes))
-const getFilesWithFileSize = async (path, suffixes) => {
-  const files = await getFiles(path, suffixes)
-  return Promise.all(
-    files.map(async file => ({
-      name: file,
-      size: (await fs.stat(file)).size
-    }))
-  )
-}
+const { readFileAsync, readRecursiveAsync, fileStatAsync } = require('./utils')
+const fs = require('fs')
 
 // load collections or environments
-const getEnvironments = async (type) => await getFiles(`examples/environments/${type || ''}`, ['.json'])
-const getCollections = async (type) => await getFiles(`examples/collections/${type || ''}`, ['.json', '.js'])
+const getCollectionsOrEnvironments = async (exampleType, type) => {
+  const data = await readRecursiveAsync(`examples/${exampleType}/${type || ''}`)
+  return data.filter(filename => filename.endsWith('.json'))
+}
 
-// load environments with file sizes
-const getEnvironmentsWithFileSize = async (type) => await getFilesWithFileSize(`examples/environments/${type || ''}`, ['.json'])
-const getCollectionsWithFileSize = async (type) => await getFilesWithFileSize(`examples/collections/${type || ''}`, ['.json', '.js'])
+// load collections or environments with file sizes
+const getCollectionsOrEnvironmentsWithFileSize = async (exampleType, type) => {
+  const dir = `examples/${exampleType}/${type || ''}`
+  const data = await readRecursiveAsync(dir)
+  const jsonFileList = data.filter(filename => filename.endsWith('.json'))
+  const jsonFileListWithFileSize = jsonFileList.map(file => {
+    return {
+      name: file,
+      size: fs.statSync(file).size
+    }
+  })
+  return jsonFileListWithFileSize
+}
 
 // load samples content
 const getSample = async (queryParams) => {
   const collections = []
   if (queryParams.collections) {
     for (const i in queryParams.collections) {
-      const collection = await fs.readFile(queryParams.collections[i], 'utf8')
+      const collection = await readFileAsync(queryParams.collections[i], 'utf8')
       collections.push(JSON.parse(collection))
     }
   }
@@ -63,7 +60,7 @@ const getSample = async (queryParams) => {
   }
 
   if (queryParams.environment) {
-    sample.inputValues = JSON.parse(await fs.readFile(queryParams.environment, 'utf8')).inputValues
+    sample.inputValues = JSON.parse(await readFileAsync(queryParams.environment, 'utf8')).inputValues
   }
 
   if (collections.length > 1) {
@@ -86,37 +83,27 @@ const getSample = async (queryParams) => {
   return sample
 }
 
-const parseCollection = (filepath, fileContent) => {
-  const ext = path.extname(filepath);
-  switch (ext) {
-    case '.js':
-      return jsToTtk(fileContent)
-    case '.json':
-      return JSON.parse(fileContent)
-    default:
-      throw new Error(`Collection filetype '${ext}' unsupported`)
-  }
-}
-
 // load samples content
 const getSampleWithFolderWise = async (queryParams) => {
-  const collections = await Promise.all((queryParams.collections || []).map(async coll => {
-    const [fileContent, stat] = await Promise.all([
-      fs.readFile(coll, 'utf8'),
-      fs.stat(coll)
-    ])
-    return {
-      name: coll,
-      path: coll,
-      size: stat.size,
-      modified: stat.mtime,
-      content: parseCollection(coll, fileContent)
+  const collections = []
+  if (queryParams.collections) {
+    for (const i in queryParams.collections) {
+      const fileContent = await readFileAsync(queryParams.collections[i], 'utf8')
+      const fileStat = await fileStatAsync(queryParams.collections[i])
+      // collections.push(JSON.parse(collection))
+      collections.push({
+        name: queryParams.collections[i],
+        path: queryParams.collections[i],
+        size: fileStat.size,
+        modified: fileStat.mtime,
+        content: JSON.parse(fileContent)
+      })
     }
-  }))
+  }
 
   let environment = {}
   if (queryParams.environment) {
-    environment = JSON.parse(await fs.readFile(queryParams.environment, 'utf8')).inputValues
+    environment = JSON.parse(await readFileAsync(queryParams.environment, 'utf8')).inputValues
   }
 
   return {
@@ -126,10 +113,8 @@ const getSampleWithFolderWise = async (queryParams) => {
 }
 
 module.exports = {
-  getCollections,
-  getEnvironments,
-  getCollectionsWithFileSize,
-  getEnvironmentsWithFileSize,
+  getCollectionsOrEnvironments,
+  getCollectionsOrEnvironmentsWithFileSize,
   getSample,
   getSampleWithFolderWise
 }
