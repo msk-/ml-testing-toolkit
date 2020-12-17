@@ -1,5 +1,9 @@
 
-const { jsToTtk } = require('../../src/lib/jsTest')
+const path = require('path')
+const fs = require('fs').promises
+const fg = require('fast-glob')
+const { jsToTtk, ttkToJs } = require('../../src/lib/jsTest')
+
 const defaultSyncClientRequest = JSON.stringify({
   operationPath: 'whatever',
   method: 'get',
@@ -145,5 +149,19 @@ describe('jsToTtk', () => {
       .toThrow('Expected no code except assertions between the first assertion and the end of the request')
   })
 })
+
+describe.skip('ttkToJs', () => {
+
+  describe('transforms all example collections to javascript without error', () => {
+    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json')).slice(4,5)
+    test.each(fnames)('transforms %s to js without error', async(fname) => {
+      const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
+      expect(() => ttkToJs(coll)).not.toThrow()
+    })
+  })
+})
+
+// describe.todo('Round trip ttkToJs -> jsToTtk produces identical collections', () => {
+// })
 
 // vim: et ts=2 sw=2

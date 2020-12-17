@@ -3,17 +3,13 @@
 // test. At the time of writing, they're all in the same order in the tests as they are in this
 // file.
 
-// TODO: high level documentation of this module
+// TODO: high level documentation of this module, and the format that a javascript test must have
 
-// Why use acorn here instead of recast? Primarily for deliberate incompatibility with jscodeshift.
-// Because jscodeshift requires recast as a dependency, instead of a peer dependency, the only way
-// for us to ensure compatibility of a recast dependency we use with the one used by jscodeshift is
-// by manually inspecting the version used by jscodeshift (and even then npm may not be guaranteed
-// to install the same version)
-// const acorn = require('acorn')
+const acorn = require('acorn')
+// TODO: are we using recast any more? Could we instead use ast-types?
 const recast = require('recast')
-const build = recast.types.builders;
-const escodegen = require('astring')
+const build = recast.types.builders
+const astring = require('astring')
 const assert = require('assert').strict
 const jsc = require('jscodeshift')
 const Ajv = require('ajv').default
@@ -31,6 +27,12 @@ const {
     summarise,
 } = require('jsc-utils')
 const ajv = new Ajv({ allErrors: true })
+const parse = (source) => acorn.parse(source, {
+  // Because we're parsing single lines in pre-request scripts, i.e. snippets that might
+  // exist inside an async function, we need to be able to parse await outside of a function.
+  allowAwaitOutsideFunction: true,
+  ecmaVersion: 2020,
+})
 
 // TODO: move this to a different file?
 // TODO: a PUT or a POST must have a body, a GET must not- we will therefore need to expand this
@@ -483,7 +485,7 @@ const ttkRequestToItBlock = (ttkRequest) =>
         build.arrowFunctionExpression(
           [],
           build.blockStatement([
-            ...recast.parse(ttkRequest.scripts?.preRequest?.exec.join('\n') || '').program.body,
+            ...parse(ttkRequest.scripts?.preRequest?.exec.join('\n') || '').body,
             build.variableDeclaration(
               "const",
               [
@@ -552,19 +554,21 @@ const ttkRequestToItBlock = (ttkRequest) =>
                         ),
                       ])
                     ),
-                    build.property(
-                      'init',
-                      build.identifier('url'),
-                      build.literal(ttkRequest.url),
-                    ),
-                  ])
+                    ttkRequest.url !== undefined
+                      ? build.property(
+                        'init',
+                        build.identifier('url'),
+                        build.literal(ttkRequest.url),
+                      )
+                      : undefined
+                  ].filter(el => el !== undefined))
                 )
               ]
             ),
-            ...recast.parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').program.body,
+            ...parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').body,
             ...ttkRequest.tests.assertions.map(
               (test) => {
-                const ast = recast.parse(test.exec.join('\n')).program.body
+                const ast = parse(test.exec.join('\n')).body
                 ast[0].comments = [
                   build.commentLine(
                     `${test.description}`,
@@ -603,7 +607,7 @@ const ttkToAst = (ttkJson) =>
     ttkJson.name
   )
 
-const ttkToJs = (ttkJson) => escodegen.generate(
+const ttkToJs = (ttkJson) => astring.generate(
   ttkToAst(ttkJson).program,
   { comments: true }
 )

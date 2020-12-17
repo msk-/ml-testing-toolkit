@@ -1,3 +1,4 @@
+const path = require('path')
 module.exports = {
   verbose: true,
   collectCoverageFrom: [
@@ -12,5 +13,10 @@ module.exports = {
     }
   },
   modulePathIgnorePatterns: ['spec_files'],
-  testEnvironment: 'node'
+  testEnvironment: 'node',
+  globals: {
+    // Allows us to consistently refer to directories relative to the source root in our tests,
+    // such as the examples directory
+    "__PROJECT_ROOT__": path.resolve(__dirname)
+  }
 }
