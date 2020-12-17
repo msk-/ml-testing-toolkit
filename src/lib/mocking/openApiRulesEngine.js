@@ -34,7 +34,7 @@ const objectStore = require('../objectStore')
 const utilsInternal = require('../utilsInternal')
 const uuid = require('uuid')
 const postmanContext = require('../scripting-engines/postman-sandbox')
-const { OpenApiMockGenerator } = require('ml-testing-toolkit-shared-lib')
+const { OpenApiMockGenerator } = require('@mojaloop/ml-testing-toolkit-shared-lib')
 
 // const jsfRefFilePathPrefix = 'spec_files/jsf_ref_files/'
 
