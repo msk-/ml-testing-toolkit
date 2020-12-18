@@ -150,10 +150,9 @@ describe('jsToTtk', () => {
   })
 })
 
-describe.skip('ttkToJs', () => {
-
+describe('ttkToJs', () => {
   describe('transforms all example collections to javascript without error', () => {
-    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json')).slice(4,5)
+    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json')).slice(5,6)
     test.each(fnames)('transforms %s to js without error', async(fname) => {
       const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
       expect(() => ttkToJs(coll)).not.toThrow()

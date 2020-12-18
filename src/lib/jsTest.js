@@ -5,13 +5,14 @@
 
 // TODO: high level documentation of this module, and the format that a javascript test must have
 
+const crypto = require('crypto');
+const assert = require('assert').strict
 const acorn = require('acorn')
 // TODO: are we using recast any more? Could we instead use ast-types?
 const recast = require('recast')
-const build = recast.types.builders
 const astring = require('astring')
-const assert = require('assert').strict
 const jsc = require('jscodeshift')
+const build = jsc // could also be: `build = recast.types.builders` or `build = require('ast-types')`
 const Ajv = require('ajv').default
 const {
     asrt,
@@ -476,6 +477,72 @@ const jsToTtk = (filepath, src) => {
   }
 }
 
+// Replace TTK vars in script elements with template literals
+//
+// Because strings containing "TTK vars" look like this:
+//   expect(callback.headers['fspiop-destination']).to.equal('{$request.headers['FSPIOP-Source']}')
+// notably this section:
+//   '{$request.headers['FSPIOP-Source']}'
+// they are unlikely to be valid javascript. Additionally, performing a simple search and replace
+// is tricky because we must correctly identify "strings within strings" but without misidentifying
+// the beginning of a string within a string as the end of a string.
+//
+// This function replaces these strings with template literals. It does so by replacing TTK vars
+// with a hash of their contents so the remaining string is valid javascript. It then replaces
+// string literals containing the previously-created hashes with template literals in which the
+// expressions are the AST representations of the original TTK vars.
+//
+// It might be possible to achieve this with a regex, but we'd need to handle matching three
+// different string characters (', ", `) with a string in between. It probably warrants three
+// different regexes:
+//   /'([^']+){\$((function|prev|request|inputs)[^}]+)}'/g
+//   /"([^"]+){\$((function|prev|request|inputs)[^}]+)}"/g
+//   /`([^"]+){\$((function|prev|request|inputs)[^}]+)}`/g
+// At the time of writing, it doesn't seem obvious to the author that the end result would be
+// simpler, more robust, or easier to reason about.
+const replaceTtkVars = (line) => {
+  // We can do this line-by-line because the regex in the original TTK code doesn't work over line
+  // breaks.
+  const ttkVarRegex = /{\$((function|prev|request|inputs)[^}]+)}/g
+  if (!ttkVarRegex.test(line)) {
+    return line
+  }
+  const m = new Map()
+  // Replace any TTK vars with a hash of the original string. This will allow us to parse the
+  // string without syntax errors.
+  const sanitisedLine = line.replace(ttkVarRegex, (ttkVar) => {
+    const hash = (str) => crypto.createHash('md5').update(str).digest('hex')
+    const ttkVarToTemplateLiteral = (v) => {
+      // TTK uses
+      // - `prev.id`, where id is an integer, to refer to previous request responses.
+      // - function.funcname to call a shared function called funcname
+      // These are not valid javascript, therefore we replace them with valid js here.
+      const ttkPrevRegex = /{\$prev\.([0-9]+)([^}]*)}/g
+      const ttkFuncRegex = /{$function\.([^}]*)}/g
+      return v.replace(ttkPrevRegex, '{\$prev[$1]$2}')
+        .replace(ttkFuncRegex, '{\$function.$1}')
+        .replace(ttkVarRegex, '\${$1}')
+    }
+    const h = hash(ttkVar)
+    m.set(h, ttkVarToTemplateLiteral(ttkVar))
+    return h
+  })
+  // Now inspect any literal strings in the parsed line for our hashes- replace these strings with
+  // template literals containing the TTK vars.
+  const hashRegex = new RegExp(`(${[...m.keys()].join('|')})`, 'g')
+  const coll = jsc(sanitisedLine, { parser: { parse } })
+  const result = coll
+    .find(jsc.Literal)
+    .filter((path) => hashRegex.test(path.value.value))
+    .forEach((path) => {
+      path.replace(
+        jsc(`\`${path.value.value.replace(hashRegex, (matchedHash) => m.get(matchedHash))}\``).getAST()[0].value.program.body[0]
+      )
+    })
+    .toSource()
+  return result
+}
+
 const ttkRequestToItBlock = (ttkRequest) =>
   build.expressionStatement(
     build.callExpression(
@@ -566,9 +633,9 @@ const ttkRequestToItBlock = (ttkRequest) =>
               ]
             ),
             ...parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').body,
-            ...ttkRequest.tests.assertions.map(
+            ...(ttkRequest.tests.assertions.map(
               (test) => {
-                const ast = parse(test.exec.join('\n')).body
+                const ast = parse(test.exec.map(replaceTtkVars).join('\n')).body
                 ast[0].comments = [
                   build.commentLine(
                     `${test.description}`,
@@ -578,7 +645,7 @@ const ttkRequestToItBlock = (ttkRequest) =>
                 ]
                 return ast
               }
-            ).flat()
+            ).flat() || [])
           ])
         )
       ]
