@@ -5,6 +5,24 @@
 
 // TODO: high level documentation of this module, and the format that a javascript test must have
 
+// Misc notes (dated):
+// Each "test case" must correspond to a single javascript test, let's say an "it" call.
+// 1 Tricky, because these can be nested multiple "describe" calls deep. So, what will we do
+//   about this? Nothing? Enforce describe depth = 1? Are describe calls optional?
+// 2 Should we support describe/it and describe/test, or prescribe one or the other?
+// 3 How do we handle the fact that javascript is probably considerably more flexible than
+//   we're likely willing to handle here? Specifically, our ad-hoc collection of constraints
+//   are likely to be subverted by enterprising test writers, and the best reliable way to get
+//   around that is likely to be to fork an existing parser. (See earlier note about parser).
+// 4 How will we handle things that go on outside the `it` calls? For example, `beforeEach`,
+//   `afterEach`, `beforeAll`, `afterAll`? Display each of them in a "setup" block?
+// 5 Likely we ignore (3) and (4). Examining some of the existing tests: the actual bulk of the
+//   logic is in the "pre-request" script anyway. In other words, the existing implementation
+//   doesn't treat tests as being all that structured anyway, so why would we? The value in
+//   this toolkit is likely ad-hoc _creation_ of tests, not manipulation of existing ones.
+//   Maybe this entire exercise is pointless. _Perhaps_ business people want to get _some_ idea of
+//   the tests that are actually occurring, even if it's adulterated?
+
 const assert = require('assert').strict
 // TODO: are we using recast any more? Could we instead use ast-types?
 const jsc = require('jscodeshift')
@@ -344,77 +362,6 @@ const jsToTtk = (filepath, src) => {
 
   return {
     test_cases: testCases
-  }
-
-  return {
-    name: filepath,
-    // Each "test case" must correspond to a single javascript test, let's say an "it" call.
-    //
-    // 1 Tricky, because these can be nested multiple "describe" calls deep. So, what will we do
-    //   about this? Nothing? Enforce describe depth = 1? Are describe calls optional?
-    // 2 Should we support describe/it and describe/test, or prescribe one or the other?
-    // 3 How do we handle the fact that javascript is probably considerably more flexible than
-    //   we're likely willing to handle here? Specifically, our ad-hoc collection of constraints
-    //   are likely to be subverted by enterprising test writers, and the best reliable way to get
-    //   around that is likely to be to fork an existing parser. (See earlier note about parser).
-    // 4 How will we handle things that go on outside the `it` calls? For example, `beforeEach`,
-    //   `afterEach`, `beforeAll`, `afterAll`? Display each of them in a "setup" block?
-    // 5 Likely we ignore (3) and (4). Examining some of the existing tests: the actual bulk of the
-    //   logic is in the "pre-request" script anyway. In other words, the existing implementation
-    //   doesn't treat tests as being all that structured anyway, so why would we? The value in
-    //   this toolkit is likely ad-hoc _creation_ of tests, not manipulation of existing ones.
-    //   Maybe this entire exercise is stupid. _Perhaps_ business people want to get _some_ idea of
-    //   the tests that are actually occurring, even if it's adulterated?
-    test_cases: [
-      {
-        id: 'index in file? index in describe?',
-        name: 'first string argument to `it` function call',
-        requests: [
-          {
-            id: 'index in test? name of variable? (not if there isn\'t a variable)',
-            description: 'retrieved from the API spec',
-            apiVersion: { // TODO: this should be retrieved from the request itself
-              minorVersion: 0,
-              majorVersion: 1,
-              type: 'fspiop',
-              asynchronous: true
-            },
-            operationPath: '/parties/or/something', // TODO: from the request itself
-            method: 'get',
-            headers: {
-              // TODO: from the request
-            },
-            params: { // TODO: unnecessary..?
-            },
-            url: '', // TODO: get from the request
-            tests: {
-              assertions: [
-                // TODO: parse from tests
-                {
-                  id: 1, // TODO: index? pretty irrelevant..
-                  description: 'whatever', // TODO: parse from second argument to expect
-                  exec: 'expect(blah whatever)' // TODO: parse from assertion
-                },
-              ]
-            },
-            scripts: {
-              // TODO: the "exec" key is completely redundant and is obviously a throwback to the
-              // Postman collection format
-              preRequest: {
-                exec: [
-                  // some code, but what, exactly?
-                ]
-              },
-              postRequest: {
-                exec: [
-                  // some code, but what, exactly?
-                ]
-              }
-            }
-          }
-        ]
-      }
-    ]
   }
 }
 
