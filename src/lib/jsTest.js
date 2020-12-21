@@ -92,6 +92,7 @@ const requestSchema = {
   ]
 }
 const requestValidator = ajv.compile(requestSchema, { strict: true })
+const mlSyncClientLibName = 'sync-client'
 
 // Map a javascript test into the TTK test collection format. We necessarily reject some tests as
 // nonconformant. This could be for several reasons:
@@ -114,7 +115,6 @@ const jsToTtk = (filepath, src) => {
   //     rigorously apply constraints, we'd be better of specifying what _is_ allowed rather than
   //     what _isn't_. And this might best be done by forking and extending an existing parser, or
   //     an existing grammar.
-  const mlSyncClientLibName = 'sync-client'
   const syncClientCalls = j.find(jsc.CallExpression)
     .filter((path) => astNodesAreEquivalent(
       path.value,
@@ -543,128 +543,158 @@ const replaceTtkVars = (line) => {
   return result
 }
 
-const ttkRequestToItBlock = (ttkRequest) =>
+const requestIdentifierName = 'request'
+const responseIdentifierName = 'response'
+const prevIdentifierName = 'prev'
+const buildPreRequestScripts = (preRequestScript) => parse(preRequestScript?.exec.join('\n') || '').body
+const buildRequestObject = (ttkRequest) =>
+  build.variableDeclaration(
+    "const",
+    [
+      build.variableDeclarator(
+        build.identifier(requestIdentifierName),
+        build.objectExpression([
+          build.property(
+            'init',
+            build.identifier('operationPath'),
+            build.literal(ttkRequest.operationPath)
+          ),
+          build.property(
+            'init',
+            build.identifier('method'),
+            build.literal(ttkRequest.method),
+          ),
+          ttkRequest.headers
+          ? build.property(
+            'init',
+            build.identifier('headers'),
+            build.objectExpression(
+              Object.entries(ttkRequest.headers).map(([k, v]) =>
+                build.property(
+                  'init',
+                  build.literal(k),
+                  build.literal(v)
+                )
+              )
+            ),
+          )
+          : undefined,
+          build.property(
+            'init',
+            build.identifier('params'),
+            build.objectExpression(
+              Object.entries(ttkRequest.params || {}).map(([k, v]) =>
+                build.property(
+                  'init',
+                  build.literal(k),
+                  build.literal(v)
+                )
+              )
+            ),
+          ),
+          build.property(
+            'init',
+            build.identifier('apiVersion'),
+            build.objectExpression([
+              build.property(
+                'init',
+                build.identifier('minorVersion'),
+                build.literal(ttkRequest.apiVersion.minorVersion)
+              ),
+              build.property(
+                'init',
+                build.identifier('majorVersion'),
+                build.literal(ttkRequest.apiVersion.majorVersion)
+              ),
+              build.property(
+                'init',
+                build.identifier('type'),
+                build.literal(ttkRequest.apiVersion.type)
+              ),
+              ttkRequest.apiVersion.asynchronous
+              ? build.property(
+                'init',
+                build.identifier('asynchronous'),
+                build.literal(ttkRequest.apiVersion.asynchronous)
+              )
+              : undefined,
+            ].filter((el) => el !== undefined))
+          ),
+          ttkRequest.url !== undefined
+          ? build.property(
+            'init',
+            build.identifier('url'),
+            build.literal(ttkRequest.url),
+          )
+          : undefined
+        ].filter(el => el !== undefined))
+      )
+    ]
+  )
+const requestExprStmtConst =
+  build.variableDeclaration(
+    'const',
+    [
+      build.variableDeclarator(
+        build.identifier(responseIdentifierName),
+        build.callExpression(
+          build.identifier(mlSyncClientLibName),
+          [build.literal(requestIdentifierName)]
+        )
+      )
+    ]
+  )
+const buildPrevAssignment = (ttkRequestId) =>
+  build.expressionStatement(
+    build.assignmentExpression(
+      '=',
+      build.memberExpression(
+        build.identifier(prevIdentifierName),
+        build.literal(ttkRequestId)
+      ),
+      build.objectExpression([
+        build.property(
+          'init',
+          build.identifier('callback'),
+          build.identifier(responseIdentifierName)
+        ),
+      ])
+    )
+  )
+const buildPostRequestScripts = (postRequestScripts) => parse(postRequestScripts?.exec.join('\n') || '').body
+const buildAssertions = (assertions) => assertions?.map(
+  (test) => {
+    const ast = parse(test.exec.map(replaceTtkVars).join('\n')).body
+    ast[0].comments = [
+      build.commentLine(
+        `${test.description}`,
+        true,
+        false,
+      )
+    ]
+    return ast
+  }
+)
+
+const ttkRequestToBlock = (ttkRequest) =>
+  build.blockStatement([
+    ...buildPreRequestScripts(ttkRequest?.scripts?.preRequest),
+    buildRequestObject(ttkRequest),
+    requestExprStmtConst,
+    buildPrevAssignment(ttkRequest.id),
+    ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest),
+    ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || [])
+  ])
+
+const testCaseToItBlock = (ttkTestCase) =>
   build.expressionStatement(
     build.callExpression(
       build.identifier('it'),
       [
-        build.literal(ttkRequest.description),
-        build.arrowFunctionExpression(
-          [],
-          build.blockStatement([
-            ...parse(ttkRequest.scripts?.preRequest?.exec.join('\n') || '').body,
-            build.variableDeclaration(
-              "const",
-              [
-                build.variableDeclarator(
-                  build.identifier('apiResult'),
-                  build.objectExpression([
-                    build.property(
-                      'init',
-                      build.identifier('operationPath'),
-                      build.literal(ttkRequest.operationPath)
-                    ),
-                    build.property(
-                      'init',
-                      build.identifier('method'),
-                      build.literal(ttkRequest.method),
-                    ),
-                    ttkRequest.headers
-                      ? build.property(
-                        'init',
-                        build.identifier('headers'),
-                        build.objectExpression(
-                          Object.entries(ttkRequest.headers).map(([k, v]) =>
-                            build.property(
-                              'init',
-                              build.literal(k),
-                              build.literal(v)
-                            )
-                          )
-                        ),
-                      )
-                      : undefined,
-                    build.property(
-                      'init',
-                      build.identifier('params'),
-                      build.objectExpression(
-                        Object.entries(ttkRequest.params || {}).map(([k, v]) =>
-                          build.property(
-                            'init',
-                            build.literal(k),
-                            build.literal(v)
-                          )
-                        )
-                      ),
-                    ),
-                    build.property(
-                      'init',
-                      build.identifier('apiVersion'),
-                      build.objectExpression([
-                        build.property(
-                          'init',
-                          build.identifier('minorVersion'),
-                          build.literal(ttkRequest.apiVersion.minorVersion)
-                        ),
-                        build.property(
-                          'init',
-                          build.identifier('majorVersion'),
-                          build.literal(ttkRequest.apiVersion.majorVersion)
-                        ),
-                        build.property(
-                          'init',
-                          build.identifier('type'),
-                          build.literal(ttkRequest.apiVersion.type)
-                        ),
-                        ttkRequest.apiVersion.asynchronous
-                          ? build.property(
-                            'init',
-                            build.identifier('asynchronous'),
-                            build.literal(ttkRequest.apiVersion.asynchronous)
-                          )
-                          : undefined,
-                      ].filter((el) => el !== undefined))
-                    ),
-                    ttkRequest.url !== undefined
-                      ? build.property(
-                        'init',
-                        build.identifier('url'),
-                        build.literal(ttkRequest.url),
-                      )
-                      : undefined
-                  ].filter(el => el !== undefined))
-                )
-              ]
-            ),
-            ...parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').body,
-            ...(ttkRequest.tests?.assertions?.map(
-              (test) => {
-                const ast = parse(test.exec.map(replaceTtkVars).join('\n')).body
-                ast[0].comments = [
-                  build.commentLine(
-                    `${test.description}`,
-                    true,
-                    false,
-                  )
-                ]
-                return ast
-              }
-            ).flat() || [])
-          ])
-        )
-      ]
-    )
-  )
-
-const testCaseToDescribeBlock = (ttkTestCase) =>
-  build.expressionStatement(
-    build.callExpression(
-      build.identifier('describe'),
-      [
         build.literal(ttkTestCase.name),
         build.arrowFunctionExpression(
           [],
-          build.blockStatement(ttkTestCase.requests.map(ttkRequestToItBlock))
+          build.blockStatement(ttkTestCase.requests.map(ttkRequestToBlock).flat())
         )
       ]
     )
@@ -673,7 +703,7 @@ const testCaseToDescribeBlock = (ttkTestCase) =>
 const ttkToAst = (ttkJson) =>
   build.file(
     build.program(
-      ttkJson.test_cases.map(testCaseToDescribeBlock)
+      ttkJson.test_cases.map(testCaseToItBlock)
     ),
     ttkJson.name
   )
