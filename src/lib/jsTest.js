@@ -569,19 +569,21 @@ const ttkRequestToItBlock = (ttkRequest) =>
                       build.identifier('method'),
                       build.literal(ttkRequest.method),
                     ),
-                    build.property(
-                      'init',
-                      build.identifier('headers'),
-                      build.objectExpression(
-                        Object.entries(ttkRequest.headers).map(([k, v]) =>
-                          build.property(
-                            'init',
-                            build.literal(k),
-                            build.literal(v)
+                    ttkRequest.headers
+                      ? build.property(
+                        'init',
+                        build.identifier('headers'),
+                        build.objectExpression(
+                          Object.entries(ttkRequest.headers).map(([k, v]) =>
+                            build.property(
+                              'init',
+                              build.literal(k),
+                              build.literal(v)
+                            )
                           )
-                        )
-                      ),
-                    ),
+                        ),
+                      )
+                      : undefined,
                     build.property(
                       'init',
                       build.identifier('params'),
@@ -614,12 +616,14 @@ const ttkRequestToItBlock = (ttkRequest) =>
                           build.identifier('type'),
                           build.literal(ttkRequest.apiVersion.type)
                         ),
-                        build.property(
-                          'init',
-                          build.identifier('asynchronous'),
-                          build.literal(ttkRequest.apiVersion.asynchronous)
-                        ),
-                      ])
+                        ttkRequest.apiVersion.asynchronous
+                          ? build.property(
+                            'init',
+                            build.identifier('asynchronous'),
+                            build.literal(ttkRequest.apiVersion.asynchronous)
+                          )
+                          : undefined,
+                      ].filter((el) => el !== undefined))
                     ),
                     ttkRequest.url !== undefined
                       ? build.property(
@@ -633,7 +637,7 @@ const ttkRequestToItBlock = (ttkRequest) =>
               ]
             ),
             ...parse(ttkRequest.scripts?.postRequest?.exec.join('\n') || '').body,
-            ...(ttkRequest.tests.assertions.map(
+            ...(ttkRequest.tests?.assertions?.map(
               (test) => {
                 const ast = parse(test.exec.map(replaceTtkVars).join('\n')).body
                 ast[0].comments = [
