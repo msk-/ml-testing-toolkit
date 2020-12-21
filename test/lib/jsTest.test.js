@@ -2,7 +2,7 @@
 const path = require('path')
 const fs = require('fs').promises
 const fg = require('fast-glob')
-const { jsToTtk, ttkToJs } = require('../../src/lib/jsTest')
+const { jsToTtk, ttkToJs } = require('../../src/lib/jstest')
 
 const defaultSyncClientRequest = JSON.stringify({
   operationPath: 'whatever',
