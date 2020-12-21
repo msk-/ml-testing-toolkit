@@ -30,63 +30,9 @@ const {
   requestIdentifierName,
   responseIdentifierName,
 } = require('./config')
-
-// TODO: move this to a different file?
 // TODO: a PUT or a POST must have a body, a GET must not- we will therefore need to expand this
 // definition. It could be worthwhile referencing the FSPIOP-API spec?
-const requestSchema = {
-  "$id": "https://mojaloop.io/schemas/ttk/request.json",
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "TTK Request",
-  "type": "object",
-  "properties": {
-    "operationPath": {
-      "description": "The request path",
-      "type": "string"
-    },
-    "method": {
-      "description": "",
-      "type": "string",
-      "enum": ["get", "post", "put", "patch", "delete", "head", "connect", "options", "trace"]
-    },
-    "headers": {
-      "description": "HTTP request headers",
-      "type": "object"
-    },
-    "params": {
-      "description": "HTTP path parameters, substituted into HTTP path before request",
-      "type": "object"
-    },
-    "apiVersion": {
-      "description": "Structured representation of API version/schema information",
-      "type": "object",
-      "properties": {
-        "minorVersion": { "type": "integer", "minimum": 0 },
-        "majorVersion": { "type": "integer", "minimum": 0 },
-        "type":         { "type": "string"  },
-        "asynchronous": { "type": "boolean" }
-      },
-      "required": [
-        "minorVersion",
-        "majorVersion",
-        "type",
-        "asynchronous"
-      ]
-    },
-    "url": {
-      "description": "The HTTP request URL.",
-      "type": "string"
-    }
-  },
-  "required": [
-    "operationPath",
-    "method",
-    "headers",
-    "params",
-    "apiVersion",
-    "url"
-  ]
-}
+const requestSchema = require('./requestSchema.json')
 const requestValidator = ajv.compile(requestSchema, { strict: true })
 
 // Map a javascript test into the TTK test collection format. We necessarily reject some tests as
