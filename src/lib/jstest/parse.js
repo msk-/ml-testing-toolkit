@@ -74,23 +74,25 @@ const jsToTtk = (filepath, src) => {
   //     rigorously apply constraints, we'd be better of specifying what _is_ allowed rather than
   //     what _isn't_. And this might best be done by forking and extending an existing parser, or
   //     an existing grammar.
-  const syncClientCalls = j.find(jsc.CallExpression)
-    .filter((path) => astNodesAreEquivalent(
-      path.value,
-      jsc.callExpression(
-        jsc.identifier('require'),
-        [
-          jsc.literal(mlSyncClientLibName)
-        ]
+  const syncClientCalls = j
+    .find(
+      jsc.CallExpression,
+      (node) => astNodesAreEquivalent(
+        node,
+        jsc.callExpression(
+          jsc.identifier('require'),
+          [
+            jsc.literal(mlSyncClientLibName)
+          ]
+        )
       )
-    ))
+    )
     .paths()
   assert(syncClientCalls.length === 1, `Expecting require(${mlSyncClientLibName}) exactly once per file`)
   const syncClientIdentifier = syncClientCalls[0].parentPath.value.id.name
   assert(
     1 === j
-      .find(jsc.VariableDeclarator)
-      .filter((path) => path.value.id.name === syncClientIdentifier)
+      .find(jsc.VariableDeclarator, (node) => node.id.name === syncClientIdentifier)
       .paths()
       .length,
     `Variable '${syncClientIdentifier}' cannot be shadowed or reused, as it is required by TTK to identify calls to the Mojaloop sync client. You may rename the variable to which you assigned require('${mlSyncClientLibName}') if you like.`
@@ -117,8 +119,7 @@ const jsToTtk = (filepath, src) => {
 
     // Get all requests made in the test
     const getRequestFunctionCalls = (coll) => coll
-      .find(jsc.CallExpression)
-      .filter((path) => path.value.callee.name === syncClientIdentifier)
+      .find(jsc.CallExpression, (node) => node.callee.name === syncClientIdentifier)
       .paths()
     const requestFunctionCalls = getRequestFunctionCalls(itBodyColl)
     assert(
@@ -184,8 +185,7 @@ const jsToTtk = (filepath, src) => {
     // That assertion is the boundary that defines the end of the preceding TTK request and the
     // beginning of the current TTK request.
     const getAssertions = (coll) => coll
-      .find(jsc.CallExpression)
-      .filter((path) => path.value.callee.name === 'expect')
+      .find(jsc.CallExpression, (node) => node.callee.name === 'expect')
       .paths()
     const assertionExprStmtsRev = getAssertions(itBodyColl)
       .map(traverseUpwardUntilTestBlock)
@@ -299,8 +299,14 @@ const jsToTtk = (filepath, src) => {
         // everything else.
         const isAssertion = (path) => /^expect\(.*/.test(summarise(path))
         const firstAssertion = rest.findIndex(isAssertion)
-        const postRequestScript = firstAssertion > -1 ? rest.slice(0, firstAssertion) : rest
+        const rawPostRequestScript = firstAssertion > -1 ? rest.slice(0, firstAssertion) : rest
         const assertions = firstAssertion > -1 ? rest.slice(firstAssertion) : []
+
+        // TODO Rename all usage of the result variable
+        const postRequestScript = rawPostRequestScript
+        // const postRequestScript = jsc([rawPostRequestScript]).renameTo()
+        // console.log(requestExprStmt.value.declarations[0].id.name)
+
         // Assert that everything in the assertions array is an assertion. Note that the
         // consequence of this is that a test must not contain any code that is not assertions once
         // the assertions begin, _at the same AST level as the assertions. This is a pretty

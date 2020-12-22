@@ -1,8 +1,9 @@
 
+const acorn = require('acorn')
 const path = require('path')
 const fs = require('fs').promises
 const fg = require('fast-glob')
-const { jsToTtk, ttkToJs } = require('../../src/lib/jstest')
+const { jsToTtk, ttkToJs, _ } = require('../../src/lib/jstest')
 
 const defaultSyncClientRequest = JSON.stringify({
   operationPath: 'whatever',
@@ -148,6 +149,55 @@ describe('jsToTtk', () => {
     expect(() => jsToTtk('whatever', src))
       .toThrow('Expected no code except assertions between the first assertion and the end of the request')
   })
+
+  it('supports multiple requests in a single it block', () => {
+    const src = [
+      `const cli = require('${mlSyncClientLibName}')`,
+      `describe('Server', () => {`,
+      `  it('starts', () => {`,
+      `    const fspiopRequest1 = ${defaultSyncClientRequest}`,
+      `    const resp1 = cli(fspiopRequest1)`,
+      `    expect(anything)`,
+      `    expect(anything)`,
+      `    const fspiopRequest2 = ${defaultSyncClientRequest}`,
+      `    const resp2 = cli(fspiopRequest2)`,
+      `    expect(anything)`,
+      `    expect(anything)`,
+      `  })`,
+      `})`,
+    ].join('\n')
+
+    expect(() => jsToTtk('whatever', src))
+      .not.toThrow()
+  })
+
+  it('replaceTtkVars correctly replaces TTK vars', () => {
+    const line = "expect('{$request.headers['FSPIOP-Source']}').to.equal('{$prev.2.callback.headers.fspiop-destination}')"
+    expect(_.replaceTtkVars(line)).toBe(
+      "expect(`${request.headers['FSPIOP-Source']}`).to.equal(`${prev[2].callback.headers.fspiop-destination}`);"
+    )
+  })
+
+  it.todo('throws a useful error when code is not valid')
+  // Note that the request object is assigned to a variable that is subsequently not used,
+  // fspioprequest1- instead the variable fspiopRequest is used. This causes an error. Detect
+  // and/or fix as required.
+  // it('throws a useful error when code is not valid', () => {
+  //   const src = [
+  //     `const cli = require('${mlSyncClientLibName}')`,
+  //     `describe('Server', () => {`,
+  //     `  it('starts', () => {`,
+  //     `    const fspiopRequest1 = ${defaultSyncClientRequest}`,
+  //     `    const resp1 = cli(fspiopRequest)`,
+  //     `    expect(anything)`,
+  //     `    expect(anything)`,
+  //     `  })`,
+  //     `})`,
+  //   ].join('\n')
+  //
+  //   expect(() => jsToTtk('whatever', src))
+  //     .not.toThrow()
+  // })
 })
 
 describe('ttkToJs', () => {
@@ -156,6 +206,14 @@ describe('ttkToJs', () => {
     test.each(fnames)('transforms %s to js without error', async(fname) => {
       const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
       expect(() => ttkToJs(coll)).not.toThrow()
+    })
+  })
+
+  describe('transforms all example collections to valid javascript without error', () => {
+    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json'))
+    test.each(fnames)('transforms %s to js without error', async(fname) => {
+      const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
+      expect(() => acorn.parse(ttkToJs(coll), { ecmaVersion: 2020 })).not.toThrow()
     })
   })
 })

@@ -26,7 +26,7 @@ const buildRequestObject = (ttkRequest) =>
     "const",
     [
       build.variableDeclarator(
-        build.identifier(requestIdentifierName),
+        build.identifier(requestIdentifierName + ttkRequest.id),
         build.objectExpression([
           build.property(
             'init',
@@ -106,7 +106,7 @@ const buildRequestObject = (ttkRequest) =>
     ]
   )
 
-const requestExprStmtConst =
+const buildRequestExprStmt = (ttkRequestId) =>
   build.variableDeclaration(
     'const',
     [
@@ -114,7 +114,7 @@ const requestExprStmtConst =
         build.identifier(responseIdentifierName),
         build.callExpression(
           build.identifier(mlSyncClientLibName),
-          [build.literal(requestIdentifierName)]
+          [build.identifier(requestIdentifierName + ttkRequestId)]
         )
       )
     ]
@@ -190,14 +190,14 @@ const replaceTtkVars = (line) => {
   })
   // Now inspect any literal strings in the parsed line for our hashes- replace these strings with
   // template literals containing the TTK vars.
-  const hashRegex = new RegExp(`(${[...m.keys()].join('|')})`, 'g')
+  // hashRegex as a function gets around the lastIndex problem: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/test#Using_test_on_a_regex_with_the_global_flag
+  const hashRegex = () => new RegExp(`(${[...m.keys()].join('|')})`, 'g')
   const coll = jsc(sanitisedLine, { parser: { parse } })
   const result = coll
-    .find(jsc.Literal)
-    .filter((path) => hashRegex.test(path.value.value))
+    .find(jsc.Literal, (node) => hashRegex().test(node.value))
     .forEach((path) => {
       path.replace(
-        jsc(`\`${path.value.value.replace(hashRegex, (matchedHash) => m.get(matchedHash))}\``).getAST()[0].value.program.body[0]
+        jsc(`\`${path.value.value.replace(hashRegex(), (matchedHash) => m.get(matchedHash))}\``).getAST()[0].value.program.body[0]
       )
     })
     .toSource()
@@ -220,15 +220,18 @@ const buildAssertions = (assertions) => assertions?.map(
   }
 )
 
-const ttkRequestToBlock = (ttkRequest) =>
-  build.blockStatement([
-    ...buildPreRequestScripts(ttkRequest?.scripts?.preRequest),
-    buildRequestObject(ttkRequest),
-    requestExprStmtConst,
-    buildPrevAssignment(ttkRequest.id),
-    ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest),
-    ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || [])
-  ])
+const ttkRequestToBlock = (ttkRequest) => [
+  // TODO: we don't use ttkRequest.description here anywhere- it would probably be useful as a
+  // comment
+  ...buildPreRequestScripts(ttkRequest?.scripts?.preRequest),
+  buildRequestObject(ttkRequest),
+  buildRequestExprStmt(ttkRequest.id),
+  buildPrevAssignment(ttkRequest.id),
+  // TODO: replace usage of ${response} with ${responseN} and ${requestN}, where N is the request
+  // ID, as required
+  ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest),
+  ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || [])
+]
 
 const testCaseToItBlock = (ttkTestCase) =>
   build.expressionStatement(
@@ -260,6 +263,10 @@ const ttkToJs = (ttkJson) => astring.generate(
 module.exports = {
   ttkToAst,
   ttkToJs,
+  // testing only, not intended as part of the module API
+  _: {
+    replaceTtkVars,
+  }
 }
 
 // vim: et ts=2 sw=2
