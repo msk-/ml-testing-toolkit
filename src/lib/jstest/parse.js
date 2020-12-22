@@ -299,13 +299,8 @@ const jsToTtk = (filepath, src) => {
         // everything else.
         const isAssertion = (path) => /^expect\(.*/.test(summarise(path))
         const firstAssertion = rest.findIndex(isAssertion)
-        const rawPostRequestScript = firstAssertion > -1 ? rest.slice(0, firstAssertion) : rest
+        const postRequestScript = firstAssertion > -1 ? rest.slice(0, firstAssertion) : rest
         const assertions = firstAssertion > -1 ? rest.slice(firstAssertion) : []
-
-        // TODO Rename all usage of the result variable
-        const postRequestScript = rawPostRequestScript
-        // const postRequestScript = jsc([rawPostRequestScript]).renameTo()
-        // console.log(requestExprStmt.value.declarations[0].id.name)
 
         // Assert that everything in the assertions array is an assertion. Note that the
         // consequence of this is that a test must not contain any code that is not assertions once

@@ -21,6 +21,76 @@ const {
 
 const buildPreRequestScripts = (preRequestScript) => parse(preRequestScript?.exec.join('\n') || '').body
 
+const renameUndeclaredVar = (coll, oldName, newName) =>
+  coll
+    .find(jsc.Identifier, {name: oldName})
+    .filter(function(path) { // ignore non-variables
+      const parent = path.parent.node;
+
+      if (
+        jsc.MemberExpression.check(parent) &&
+        parent.property === path.node &&
+        !parent.computed
+      ) {
+        // obj.oldName
+        return false;
+      }
+
+      if (
+        jsc.Property.check(parent) &&
+        parent.key === path.node &&
+        !parent.computed
+      ) {
+        // { oldName: 3 }
+        return false;
+      }
+
+      if (
+        jsc.MethodDefinition.check(parent) &&
+        parent.key === path.node &&
+        !parent.computed
+      ) {
+        // class A { oldName() {} }
+        return false;
+      }
+
+      if (
+        jsc.ClassProperty.check(parent) &&
+        parent.key === path.node &&
+        !parent.computed
+      ) {
+        // class A { oldName = 3 }
+        return false;
+      }
+
+      if (
+        jsc.JSXAttribute.check(parent) &&
+        parent.name === path.node &&
+        !parent.computed
+      ) {
+        // <Foo oldName={oldName} />
+        return false;
+      }
+
+      return true;
+    })
+    .forEach(function(path) {
+      // It may look like we filtered out properties,
+      // but the filter only ignored property "keys", not "value"s
+      // In shorthand properties, "key" and "value" both have an
+      // Identifier with the same structure.
+      const parent = path.parent.node;
+      if (
+        jsc.Property.check(parent) &&
+        parent.shorthand &&
+        !parent.method
+      ) {
+        path.parent.get('shorthand').replace(false);
+      }
+
+      path.get('name').replace(newName);
+    })
+
 const buildRequestObject = (ttkRequest) =>
   build.variableDeclaration(
     "const",
@@ -111,7 +181,7 @@ const buildRequestExprStmt = (ttkRequestId) =>
     'const',
     [
       build.variableDeclarator(
-        build.identifier(responseIdentifierName),
+        build.identifier(responseIdentifierName + ttkRequestId),
         build.callExpression(
           build.identifier(mlSyncClientLibName),
           [build.identifier(requestIdentifierName + ttkRequestId)]
@@ -204,7 +274,12 @@ const replaceTtkVars = (line) => {
   return result
 }
 
-const buildPostRequestScripts = (postRequestScripts) => parse(postRequestScripts?.exec.join('\n') || '').body
+const buildPostRequestScripts = (postRequestScripts, ttkRequestId) =>
+  renameUndeclaredVar(
+    jsc(postRequestScripts?.exec.join('\n') || '', { parser: { parse } }),
+    responseIdentifierName,
+    responseIdentifierName + ttkRequestId
+  ).getAST()[0].value.program.body
 
 const buildAssertions = (assertions) => assertions?.map(
   (test) => {
@@ -227,9 +302,9 @@ const ttkRequestToBlock = (ttkRequest) => [
   buildRequestObject(ttkRequest),
   buildRequestExprStmt(ttkRequest.id),
   buildPrevAssignment(ttkRequest.id),
-  // TODO: replace usage of ${response} with ${responseN} and ${requestN}, where N is the request
-  // ID, as required
-  ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest),
+  // TODO: replace usage of ${response} with ${responseN} and ${request} with ${requestN}, where N
+  // is the request ID, as required
+  ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest, ttkRequest.id),
   ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || [])
 ]
 
