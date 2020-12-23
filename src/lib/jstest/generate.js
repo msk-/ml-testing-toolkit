@@ -4,14 +4,18 @@
 const crypto = require('crypto')
 const acorn = require('acorn')
 const astring = require('astring')
-const jsc = require('jscodeshift')
-const build = jsc // could also be: `build = recast.types.builders` or `build = require('ast-types')`
+const _ = require('lodash')
+const unquotedValidator = require('unquoted-property-validator')
+
 const parse = (source) => acorn.parse(source, {
   // Because we're parsing single lines in pre-request scripts, i.e. snippets that might
   // exist inside an async function, we need to be able to parse await outside of a function.
   allowAwaitOutsideFunction: true,
   ecmaVersion: 2020,
 })
+const jsc = require('jscodeshift').withParser({ parse })
+const build = jsc // could also be: `build = recast.types.builders` or `build = require('ast-types')`
+const customMethods = require('./jsc-methods')
 const {
   mlSyncClientLibName,
   prevIdentifierName,
@@ -19,84 +23,16 @@ const {
   responseIdentifierName,
 } = require('./config')
 
+customMethods.register(jsc)
+
 const buildPreRequestScripts = (preRequestScript) => parse(preRequestScript?.exec.join('\n') || '').body
-
-const renameUndeclaredVar = (coll, oldName, newName) =>
-  coll
-    .find(jsc.Identifier, {name: oldName})
-    .filter(function(path) { // ignore non-variables
-      const parent = path.parent.node;
-
-      if (
-        jsc.MemberExpression.check(parent) &&
-        parent.property === path.node &&
-        !parent.computed
-      ) {
-        // obj.oldName
-        return false;
-      }
-
-      if (
-        jsc.Property.check(parent) &&
-        parent.key === path.node &&
-        !parent.computed
-      ) {
-        // { oldName: 3 }
-        return false;
-      }
-
-      if (
-        jsc.MethodDefinition.check(parent) &&
-        parent.key === path.node &&
-        !parent.computed
-      ) {
-        // class A { oldName() {} }
-        return false;
-      }
-
-      if (
-        jsc.ClassProperty.check(parent) &&
-        parent.key === path.node &&
-        !parent.computed
-      ) {
-        // class A { oldName = 3 }
-        return false;
-      }
-
-      if (
-        jsc.JSXAttribute.check(parent) &&
-        parent.name === path.node &&
-        !parent.computed
-      ) {
-        // <Foo oldName={oldName} />
-        return false;
-      }
-
-      return true;
-    })
-    .forEach(function(path) {
-      // It may look like we filtered out properties,
-      // but the filter only ignored property "keys", not "value"s
-      // In shorthand properties, "key" and "value" both have an
-      // Identifier with the same structure.
-      const parent = path.parent.node;
-      if (
-        jsc.Property.check(parent) &&
-        parent.shorthand &&
-        !parent.method
-      ) {
-        path.parent.get('shorthand').replace(false);
-      }
-
-      path.get('name').replace(newName);
-    })
 
 const buildRequestObject = (ttkRequest) =>
   build.variableDeclaration(
     "const",
     [
       build.variableDeclarator(
-        build.identifier(requestIdentifierName + ttkRequest.id),
+        build.identifier(requestIdentifierName),
         build.objectExpression([
           build.property(
             'init',
@@ -176,15 +112,15 @@ const buildRequestObject = (ttkRequest) =>
     ]
   )
 
-const buildRequestExprStmt = (ttkRequestId) =>
+const buildRequestExprStmt = () =>
   build.variableDeclaration(
     'const',
     [
       build.variableDeclarator(
-        build.identifier(responseIdentifierName + ttkRequestId),
+        build.identifier(responseIdentifierName),
         build.callExpression(
           build.identifier(mlSyncClientLibName),
-          [build.identifier(requestIdentifierName + ttkRequestId)]
+          [build.identifier(requestIdentifierName)]
         )
       )
     ]
@@ -248,9 +184,17 @@ const replaceTtkVars = (line) => {
       // - `prev.id`, where id is an integer, to refer to previous request responses.
       // - function.funcname to call a shared function called funcname
       // These are not valid javascript, therefore we replace them with valid js here.
-      const ttkPrevRegex = /{\$prev\.([0-9]+)([^}]*)}/g
+      const ttkPrevRegex = /{\$prev\.([0-9]+).([^}]*)}/g
       const ttkFuncRegex = /{$function\.([^}]*)}/g
-      return v.replace(ttkPrevRegex, '{\$prev[$1]$2}')
+      const createPropertyAccessor = (propIdentifier) => {
+        const { quotedValue, needsBrackets } = unquotedValidator(propIdentifier)
+        return needsBrackets
+          ? `[${quotedValue}]`
+          : `.${propIdentifier}`
+      }
+      const ttkPrevReplacer = (match, prevId, prevPath) =>
+        `{\$prev[${prevId}]${_.toPath(prevPath).map(createPropertyAccessor).join('')}}`
+      return v.replace(ttkPrevRegex, ttkPrevReplacer)
         .replace(ttkFuncRegex, '{\$function.$1}')
         .replace(ttkVarRegex, '\${$1}')
     }
@@ -262,24 +206,33 @@ const replaceTtkVars = (line) => {
   // template literals containing the TTK vars.
   // hashRegex as a function gets around the lastIndex problem: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/RegExp/test#Using_test_on_a_regex_with_the_global_flag
   const hashRegex = () => new RegExp(`(${[...m.keys()].join('|')})`, 'g')
-  const coll = jsc(sanitisedLine, { parser: { parse } })
+  const coll = jsc(sanitisedLine)
   const result = coll
     .find(jsc.Literal, (node) => hashRegex().test(node.value))
     .forEach((path) => {
       path.replace(
-        jsc(`\`${path.value.value.replace(hashRegex(), (matchedHash) => m.get(matchedHash))}\``).getAST()[0].value.program.body[0]
+        parse(`\`${path.value.value.replace(hashRegex(), (matchedHash) => m.get(matchedHash))}\``)
+          .body[0].expression
       )
     })
     .toSource()
   return result
 }
 
-const buildPostRequestScripts = (postRequestScripts, ttkRequestId) =>
-  renameUndeclaredVar(
-    jsc(postRequestScripts?.exec.join('\n') || '', { parser: { parse } }),
-    responseIdentifierName,
-    responseIdentifierName + ttkRequestId
-  ).getAST()[0].value.program.body
+const renameRequestResponse = (coll, ttkRequestId) => {
+  coll
+    .getAllVarReferencesByName(responseIdentifierName)
+    .renameIdentifiersTo(responseIdentifierName + ttkRequestId)
+  coll
+    .getAllVarReferencesByName(requestIdentifierName)
+    .renameIdentifiersTo(requestIdentifierName + ttkRequestId)
+  return coll
+}
+
+const buildPostRequestScripts = (postRequestScripts) => {
+  return jsc(postRequestScripts?.exec.join('\n') || '')
+    .getAST()[0].value.program.body
+}
 
 const buildAssertions = (assertions) => assertions?.map(
   (test) => {
@@ -295,18 +248,25 @@ const buildAssertions = (assertions) => assertions?.map(
   }
 )
 
-const ttkRequestToBlock = (ttkRequest) => [
-  // TODO: we don't use ttkRequest.description here anywhere- it would probably be useful as a
-  // comment
-  ...buildPreRequestScripts(ttkRequest?.scripts?.preRequest),
-  buildRequestObject(ttkRequest),
-  buildRequestExprStmt(ttkRequest.id),
-  buildPrevAssignment(ttkRequest.id),
-  // TODO: replace usage of ${response} with ${responseN} and ${request} with ${requestN}, where N
-  // is the request ID, as required
-  ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest, ttkRequest.id),
-  ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || [])
-]
+const ttkRequestToBlock = (ttkRequest) => {
+  const coll = jsc([
+    // TODO: we don't use ttkRequest.description here anywhere- it would probably be useful as a
+    // comment
+    ...buildPreRequestScripts(ttkRequest?.scripts?.preRequest),
+    buildRequestObject(ttkRequest),
+    buildRequestExprStmt(),
+    buildPrevAssignment(ttkRequest.id),
+    ...buildPostRequestScripts(ttkRequest?.scripts?.postRequest),
+    ...(buildAssertions(ttkRequest.tests?.assertions)?.flat() || []),
+  ])
+  coll
+    .getAllVarReferencesByName(responseIdentifierName)
+    .renameIdentifiersTo(responseIdentifierName + ttkRequest.id)
+  coll
+    .getAllVarReferencesByName(requestIdentifierName)
+    .renameIdentifiersTo(requestIdentifierName + ttkRequest.id)
+  return coll.nodes()
+}
 
 const testCaseToItBlock = (ttkTestCase) =>
   build.expressionStatement(
