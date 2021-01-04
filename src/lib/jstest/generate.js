@@ -146,6 +146,10 @@ const buildPrevAssignment = (ttkRequestId) =>
 
 // Replace TTK vars in script elements with template literals
 //
+// Guided by the implementation here:
+// https://github.com/mojaloop/ml-testing-toolkit/blob/1392f99ef85ca65968707e54a756a6975d9f67ff/src/lib/test-outbound/outbound-initiator.js#L576
+// but with the constraint that we must produce valid javascript
+//
 // Because strings containing "TTK vars" look like this:
 //   expect(callback.headers['fspiop-destination']).to.equal('{$request.headers['FSPIOP-Source']}')
 // notably this section:

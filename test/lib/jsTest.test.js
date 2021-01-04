@@ -201,19 +201,33 @@ describe('jsToTtk', () => {
 })
 
 describe('ttkToJs', () => {
+  const collectionFiles = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json'))
+  const collections = new Map(collectionFiles.map((fname) => [fname, require(fname)]))
+
   describe('transforms all example collections to javascript without error', () => {
-    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json')).slice(0,1)
-    test.each(fnames)('transforms %s to js without error', async(fname) => {
-      const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
+    test.each(collectionFiles)('transforms %s to js without error', (fname) => {
+      const coll = collections.get(fname)
       expect(() => ttkToJs(coll)).not.toThrow()
     })
   })
 
   describe('transforms all example collections to valid javascript without error', () => {
-    const fnames = fg.sync(path.join(__PROJECT_ROOT__, 'examples/collections/**/*.json'))
-    test.each(fnames)('transforms %s to js without error', async(fname) => {
-      const coll = JSON.parse(await fs.readFile(fname, 'utf8'))
+    test.each(collectionFiles)('transforms %s to valid js without error', (fname) => {
+      const coll = collections.get(fname)
       expect(() => acorn.parse(ttkToJs(coll), { ecmaVersion: 2020 })).not.toThrow()
+    })
+  })
+
+  describe('transforms all example collections to javascript that can be converted to TTK data format successfully', () => {
+    test.skip.each(collectionFiles)('transforms %s to js then to TTK data format without error', (fname) => {
+      const coll = collections.get(fname)
+      expect(() => acorn.parse(ttkToJs(coll), { ecmaVersion: 2020 })).not.toThrow()
+    })
+  })
+
+  describe('all transformed javascript collections are correctly parsed to produce the same data as the original', () => {
+    // to do? Will _at least_ require tidying up the existing TTK collections
+    test.skip.each(collectionFiles)('%s transformed to js and parsed produces the same data as the original', () => {
     })
   })
 })
